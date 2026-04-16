@@ -22,7 +22,7 @@ INDEX_SYMBOLS = ["^NSEI", "^CRSLSME"]  # Optional: currently unused directly but
 # PASTE YOUR APPS SCRIPT WEB APP URL HERE:
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyhdbIDYjOOJab7OibhytbpM0ys0aINPRjXo4o0j3_sQDCo9wh4rhTzdZdM-c9KX0db/exec"
 
-FETCH_TIMES = ["09:15", "11:00", "12:30", "14:00", "15:45"]
+FETCH_TIMES = ["09:30", "11:00", "12:30", "14:30", "15:00"]
 TIMEZONE = "Asia/Kolkata"
 
 # ==========================================
