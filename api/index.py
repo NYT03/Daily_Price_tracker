@@ -30,15 +30,26 @@ TIMEZONE = "Asia/Kolkata"
 # ==========================================
 # FETCHING LOGIC
 # ==========================================
-def fetch_single(symbol):
+def fetch_single(symbol, target_slot, now_dt):
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period="1d", interval="1m")
         if df.empty: 
             return {"symbol": symbol, "error": "No data"}
             
+        # Ensure 'today' data only (not previous date)
+        today_date = now_dt.date()
+        df = df[df.index.date == today_date]
+        
+        if df.empty:
+            return {"symbol": symbol, "error": "No data for today"}
+            
+        # Price is exactly the current real-time closing price at execution
         latest_price = float(df.iloc[-1]['Close'])
+        
+        # Cumulatively sum volume for today up to the current second
         cum_vol = int(df['Volume'].sum())
+        
         return {
             "symbol": symbol,
             "price": latest_price,
@@ -47,13 +58,13 @@ def fetch_single(symbol):
     except Exception as e:
         return {"symbol": symbol, "error": str(e)}
 
-def fetch_all_data():
+def fetch_all_data(target_slot, now_dt):
     results = {}
     all_symbols = ALL_SYMBOLS
     
     # ThreadPool for parallel downloading (Vercel Serverless requires speed)
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(fetch_single, sym): sym for sym in all_symbols}
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(fetch_single, sym, target_slot, now_dt): sym for sym in all_symbols}
         for future in futures:
             data = future.result()
             if "error" not in data:
@@ -102,7 +113,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # Fetch Data
-        market_data = fetch_all_data()
+        market_data = fetch_all_data(target_slot, now)
         if not market_data:
             self.send_response(500)
             self.send_header('Content-type', 'text/plain')
