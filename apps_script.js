@@ -10,18 +10,33 @@ function doPost(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName("Data");
     
-    // 1. Build the ultra-wide layout if it does not exist
+    // 1. Build or Rebuild the ultra-wide layout if the symbols changed
+    let rebuildHeaders = false;
     if (!sheet) {
       sheet = ss.insertSheet("Data");
-      
+      rebuildHeaders = true;
+    } else {
+      let currentHeaders = sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getValues()[0];
+      companies.forEach((company, cIndex) => {
+          let offset = 1 + (cIndex * fetch_times.length * 2); // zero-based index for array
+          if (offset >= currentHeaders.length || currentHeaders[offset] !== company) {
+              rebuildHeaders = true;
+          }
+      });
+    }
+
+    if (rebuildHeaders) {
+      let requiredCols = 2 + (companies.length * fetch_times.length * 2);
+      if (sheet.getMaxColumns() < requiredCols) {
+         sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredCols - sheet.getMaxColumns());
+      }
+
       let row1 = [""]; // Header A1
       let row2 = ["Date"]; // Header A2
       let row3 = [""]; // Header A3
       
       companies.forEach((company) => {
          row1.push(company);
-         // Padding empty columns for the rest of this company's block (so we can merge later)
-         // Each time slot takes 2 columns (Price + Volume), so (fetch_times.length * 2) - 1 empty padding needed
          for(let i=1; i < (fetch_times.length * 2); i++) {
            row1.push("");
          }
@@ -34,22 +49,23 @@ function doPost(e) {
          });
       });
       
-      sheet.appendRow(row1);
-      sheet.appendRow(row2);
-      sheet.appendRow(row3);
+      if (sheet.getLastRow() > 0) {
+         sheet.getRange(1, 1, 2, sheet.getMaxColumns()).breakApart();
+      }
+      
+      sheet.getRange(1, 1, 1, row1.length).setValues([row1]);
+      sheet.getRange(2, 1, 1, row2.length).setValues([row2]);
+      sheet.getRange(3, 1, 1, row3.length).setValues([row3]);
       
       // Formatting and Merging
-      // Apply Bold
-      sheet.getRange(1, 1, 3, sheet.getLastColumn()).setFontWeight("bold").setHorizontalAlignment("center");
+      sheet.getRange(1, 1, 3, sheet.getMaxColumns()).setFontWeight("bold").setHorizontalAlignment("center");
       
       companies.forEach((company, cIndex) => {
          let cStartCol = 2 + (cIndex * fetch_times.length * 2);
-         // Merge Company Name across all its time slots
          sheet.getRange(1, cStartCol, 1, fetch_times.length * 2).mergeAcross();
          
          fetch_times.forEach((time, tIndex) => {
             let tStartCol = cStartCol + (tIndex * 2);
-            // Merge the specific Time Slot across Price + Volume columns
             sheet.getRange(2, tStartCol, 1, 2).mergeAcross();
          });
       });
@@ -92,6 +108,14 @@ function doPost(e) {
     // 3. Write data intelligently mapped across the correct column offsets
     let timeIndex = fetch_times.indexOf(targetTimeSlot);
     if (timeIndex !== -1) {
+       let requiredCols = 2 + (companies.length * fetch_times.length * 2);
+       if (sheet.getMaxColumns() < requiredCols) {
+          sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredCols - sheet.getMaxColumns());
+       }
+       
+       let rowRange = sheet.getRange(rowIndex, 1, 1, requiredCols);
+       let rowValues = rowRange.getValues()[0];
+       
        companies.forEach((company, cIndex) => {
           let cBaseColumn = 2 + (cIndex * fetch_times.length * 2); // Which major column this company starts
           let targetColumn = cBaseColumn + (timeIndex * 2); // Exact mapped column for Price & Volume layout
@@ -100,11 +124,13 @@ function doPost(e) {
              let price = marketData[company].price;
              let vol = marketData[company].volume.toLocaleString('en-US'); // Add commas natively
              
-             // Commit Value safely
-             sheet.getRange(rowIndex, targetColumn).setValue(price);
-             sheet.getRange(rowIndex, targetColumn + 1).setValue(vol);
+             // -1 because array is 0-indexed
+             rowValues[targetColumn - 1] = price;
+             rowValues[targetColumn] = vol;
           }
        });
+       
+       rowRange.setValues([rowValues]);
     }
 
     // Output JSON cleanly for Vercel
