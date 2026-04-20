@@ -29,12 +29,12 @@ TO_EMAIL = os.environ.get("TO_EMAIL", "nikhilraval706@gmail.com")
 # ==========================================
 # WEEKLY RETURN LOGIC
 # ==========================================
-def get_last_two_fridays():
+def get_target_fridays():
     today = datetime.today()
     days_since_friday = (today.weekday() - 4) % 7
-    last_friday = today - timedelta(days=days_since_friday)
-    previous_friday = last_friday - timedelta(days=7)
-    return last_friday.date(), previous_friday.date()
+    current_friday = today - timedelta(days=days_since_friday)
+    last_friday = current_friday - timedelta(days=7)
+    return current_friday.date(), last_friday.date()
 
 def get_target_close(data, target_date):
     past_data = data.loc[:pd.to_datetime(target_date)]
@@ -47,7 +47,7 @@ def get_target_close(data, target_date):
         return val, past_data.index[-1].date()
     return None, None
 
-def calculate_single_return(ticker, start_date, end_date, last_friday, previous_friday):
+def calculate_single_return(ticker, start_date, end_date, current_friday, last_friday):
     try:
         data = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), progress=False)
         if data.empty:
@@ -56,17 +56,17 @@ def calculate_single_return(ticker, start_date, end_date, last_friday, previous_
         if data.index.tz is not None:
             data.index = data.index.tz_localize(None)
         
+        close_current, actual_current_date = get_target_close(data, current_friday)
         close_last, actual_last_date = get_target_close(data, last_friday)
-        close_prev, actual_prev_date = get_target_close(data, previous_friday)
         
-        if close_last is not None and close_prev is not None:
-            weekly_return = ((close_last - close_prev) / close_prev) * 100
+        if close_current is not None and close_last is not None:
+            weekly_return = ((close_current - close_last) / close_last) * 100
             return {
                 "ticker": ticker,
-                "previous_close": close_prev,
-                "previous_date": str(actual_prev_date),
-                "last_close": close_last,
-                "last_date": str(actual_last_date),
+                "last_friday_close": close_last,
+                "last_friday_date": str(actual_last_date),
+                "current_friday_close": close_current,
+                "current_friday_date": str(actual_current_date),
                 "weekly_return": weekly_return
             }
         else:
@@ -75,13 +75,13 @@ def calculate_single_return(ticker, start_date, end_date, last_friday, previous_
         return {"ticker": ticker, "error": str(e)}
 
 def get_all_weekly_returns():
-    last_friday, previous_friday = get_last_two_fridays()
-    start_date = previous_friday - timedelta(days=10)
-    end_date = last_friday + timedelta(days=1)
+    current_friday, last_friday = get_target_fridays()
+    start_date = last_friday - timedelta(days=10)
+    end_date = current_friday + timedelta(days=1)
     
     results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(calculate_single_return, sym, start_date, end_date, last_friday, previous_friday): sym for sym in COMPANY_SYMBOLS}
+        futures = {executor.submit(calculate_single_return, sym, start_date, end_date, current_friday, last_friday): sym for sym in COMPANY_SYMBOLS}
         for future in futures:
             results.append(future.result())
             
@@ -91,7 +91,7 @@ def get_all_weekly_returns():
 # EMAIL LOGIC
 # ==========================================
 def format_html_email(results):
-    last_friday, _ = get_last_two_fridays()
+    current_friday, _ = get_target_fridays()
     html = f"""
     <html>
       <head>
@@ -105,12 +105,12 @@ def format_html_email(results):
         </style>
       </head>
       <body>
-        <h2>Weekly Return Report - Week Ending {last_friday}</h2>
+        <h2>Weekly Return Report - Week Ending {current_friday}</h2>
         <table>
           <tr>
             <th>Ticker</th>
-            <th>Previous Friday Close</th>
             <th>Last Friday Close</th>
+            <th>Current Friday Close</th>
             <th>Weekly Return (%)</th>
           </tr>
     """
@@ -124,8 +124,8 @@ def format_html_email(results):
             html += f"""
             <tr>
               <td class='ticker'>{res['ticker']}</td>
-              <td>{res['previous_close']:.2f} <br><small>({res['previous_date']})</small></td>
-              <td>{res['last_close']:.2f} <br><small>({res['last_date']})</small></td>
+              <td>{res['last_friday_close']:.2f} <br><small>({res['last_friday_date']})</small></td>
+              <td>{res['current_friday_close']:.2f} <br><small>({res['current_friday_date']})</small></td>
               <td class='{color_class}'>{ret:.2f}%</td>
             </tr>
             """
