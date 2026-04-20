@@ -39,16 +39,21 @@ def fetch_single(symbol, target_slot, now_dt):
             
         # Ensure 'today' data only (not previous date)
         today_date = now_dt.date()
-        df = df[df.index.date == today_date]
+        df_today = df[df.index.date == today_date]
         
-        if df.empty:
-            return {"symbol": symbol, "error": "No data for today"}
+        if df_today.empty:
+            latest_price = float(df.iloc[-1]['Close'])
+            return {
+                "symbol": symbol,
+                "price": latest_price,
+                "volume": 0
+            }
             
         # Price is exactly the current real-time closing price at execution
-        latest_price = float(df.iloc[-1]['Close'])
+        latest_price = float(df_today.iloc[-1]['Close'])
         
         # Cumulatively sum volume for today up to the current second
-        cum_vol = int(df['Volume'].sum())
+        cum_vol = int(df_today['Volume'].sum())
         
         return {
             "symbol": symbol,
