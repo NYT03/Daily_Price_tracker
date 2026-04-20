@@ -22,9 +22,9 @@ COMPANY_SYMBOLS = [
 # Email Configuration - Set these in Vercel Environment Variables
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")  # e.g., your_email@gmail.com
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") # App Password
-TO_EMAIL = os.environ.get("TO_EMAIL", SMTP_EMAIL)
+SMTP_EMAIL = os.environ.get("nikraval03@gmail.com", "")  # e.g., your_email@gmail.com
+SMTP_PASSWORD = os.environ.get("bdnc mgfv vprj enez", "") # App Password
+TO_EMAIL = os.environ.get("nikhilraval706@gmail.com", SMTP_EMAIL)
 
 # ==========================================
 # WEEKLY RETURN LOGIC
