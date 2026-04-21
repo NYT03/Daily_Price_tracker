@@ -1,7 +1,6 @@
 from http.server import BaseHTTPRequestHandler
-import yfinance as yf
+import requests
 from datetime import datetime, timedelta
-import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 import smtplib
 from email.mime.text import MIMEText
@@ -27,8 +26,11 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "bdnc mgfv vprj enez") # App Pas
 TO_EMAIL = os.environ.get("TO_EMAIL", "nikhilraval706@gmail.com")
 
 # ==========================================
-# WEEKLY RETURN LOGIC
+# WEEKLY RETURN LOGIC  (via 0xramm Indian Stock Market API)
 # ==========================================
+API_BASE_URL = "https://nse-api-ruby.vercel.app"
+API_TIMEOUT  = 15  # seconds per request
+
 def get_target_fridays():
     today = datetime.today()
     days_since_friday = (today.weekday() - 4) % 7
@@ -36,55 +38,54 @@ def get_target_fridays():
     last_friday = current_friday - timedelta(days=7)
     return current_friday.date(), last_friday.date()
 
-def get_target_close(data, target_date):
-    past_data = data.loc[:pd.to_datetime(target_date)]
-    if not past_data.empty:
-        val = past_data['Close'].iloc[-1]
-        if hasattr(val, 'item'):
-            val = val.item()
-        elif isinstance(val, pd.Series):
-            val = val.iloc[0]
-        return val, past_data.index[-1].date()
-    return None, None
+def fetch_stock_from_api(symbol):
+    """
+    Calls GET /stock?symbol=<symbol>&res=num
+    Returns the parsed JSON data dict, or raises on failure.
+    """
+    url = f"{API_BASE_URL}/stock"
+    resp = requests.get(url, params={"symbol": symbol, "res": "num"}, timeout=API_TIMEOUT)
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("status") != "success":
+        raise ValueError(payload.get("message", "API error"))
+    return payload["data"]
 
-def calculate_single_return(ticker, start_date, end_date, current_friday, last_friday):
+def calculate_single_return(symbol):
+    """
+    Fetches stock data from the REST API.
+    Uses:
+      - last_price       → current Friday closing price
+      - previous_close   → last Friday closing price
+    """
     try:
-        data = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), progress=False)
-        if data.empty:
-            return {"ticker": ticker, "error": "No data"}
-            
-        if data.index.tz is not None:
-            data.index = data.index.tz_localize(None)
-        
-        close_current, actual_current_date = get_target_close(data, current_friday)
-        close_last, actual_last_date = get_target_close(data, last_friday)
-        
-        if close_current is not None and close_last is not None:
-            weekly_return = ((close_current - close_last) / close_last) * 100
-            return {
-                "ticker": ticker,
-                "last_friday_close": close_last,
-                "last_friday_date": str(actual_last_date),
-                "current_friday_close": close_current,
-                "current_friday_date": str(actual_current_date),
-                "weekly_return": weekly_return
-            }
-        else:
-            return {"ticker": ticker, "error": "Insufficient data"}
+        current_friday, last_friday = get_target_fridays()
+        data = fetch_stock_from_api(symbol)
+
+        close_current = data.get("last_price")
+        close_last    = data.get("previous_close")
+
+        if close_current is None or close_last is None:
+            return {"ticker": symbol, "error": "Missing price fields in API response"}
+
+        weekly_return = ((close_current - close_last) / close_last) * 100
+        return {
+            "ticker": symbol,
+            "last_friday_close":   close_last,
+            "last_friday_date":    str(last_friday),
+            "current_friday_close": close_current,
+            "current_friday_date":  str(current_friday),
+            "weekly_return":       weekly_return
+        }
     except Exception as e:
-        return {"ticker": ticker, "error": str(e)}
+        return {"ticker": symbol, "error": str(e)}
 
 def get_all_weekly_returns():
-    current_friday, last_friday = get_target_fridays()
-    start_date = last_friday - timedelta(days=10)
-    end_date = current_friday + timedelta(days=1)
-    
     results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(calculate_single_return, sym, start_date, end_date, current_friday, last_friday): sym for sym in COMPANY_SYMBOLS}
+        futures = {executor.submit(calculate_single_return, sym): sym for sym in COMPANY_SYMBOLS}
         for future in futures:
             results.append(future.result())
-            
     return results
 
 # ==========================================
