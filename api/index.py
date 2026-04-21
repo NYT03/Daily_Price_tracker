@@ -30,31 +30,69 @@ TIMEZONE = "Asia/Kolkata"
 # ==========================================
 # FETCHING LOGIC
 # ==========================================
+def get_last_traded_price(ticker, today_date):
+    """
+    Fetches the closing price from the most recent trading day.
+    Looks back up to 5 days to find a valid close price.
+    Returns (price, was_today) tuple.
+    """
+    # Try fetching last 5 days of daily data to find last traded price
+    df_hist = ticker.history(period="5d", interval="1d")
+    if df_hist.empty:
+        return None, False
+
+    # Filter out today's row if present (we want last *previous* day's close)
+    df_prev = df_hist[df_hist.index.date < today_date]
+    if df_prev.empty:
+        # If only today is available (rare edge case), use it
+        df_prev = df_hist
+
+    last_close = float(df_prev.iloc[-1]['Close'])
+    return last_close, False
+
+
 def fetch_single(symbol, target_slot, now_dt):
     try:
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period="1d", interval="1m")
-        if df.empty: 
-            return {"symbol": symbol, "error": "No data"}
-            
-        # Ensure 'today' data only (not previous date)
         today_date = now_dt.date()
+
+        # ── Step 1: Try intraday 1-minute data for today ──────────────────────
+        df = ticker.history(period="1d", interval="1m")
+
+        if df.empty:
+            # No intraday data at all — fall back to last known daily close
+            last_price, _ = get_last_traded_price(ticker, today_date)
+            if last_price is None:
+                return {"symbol": symbol, "error": "No data available"}
+            return {"symbol": symbol, "price": last_price, "volume": 0}
+
+        # Filter to today's rows only
         df_today = df[df.index.date == today_date]
-        
+
+        # ── Step 2: Stock not traded at all today ─────────────────────────────
         if df_today.empty:
-            latest_price = float(df.iloc[-1]['Close'])
-            return {
-                "symbol": symbol,
-                "price": latest_price,
-                "volume": 0
-            }
-            
-        # Price is exactly the current real-time closing price at execution
+            # Use last available intraday row if it falls within the last 5 days,
+            # otherwise pull from the multi-day daily history.
+            last_price, _ = get_last_traded_price(ticker, today_date)
+            if last_price is None:
+                # Final fallback: use whatever is in the intraday df
+                last_price = float(df.iloc[-1]['Close'])
+            return {"symbol": symbol, "price": last_price, "volume": 0}
+
+        # ── Step 3: Stock has data today ──────────────────────────────────────
         latest_price = float(df_today.iloc[-1]['Close'])
-        
-        # Cumulatively sum volume for today up to the current second
         cum_vol = int(df_today['Volume'].sum())
-        
+
+        # ── Step 4: Detect no price-change (illiquid / stale tick) ───────────
+        # If volume is 0 for today, it means the market reported a stale price.
+        # Keep the last known price but set volume = 0 to signal no activity.
+        if cum_vol == 0:
+            # Try to get a cleaner price from multi-day history
+            hist_price, _ = get_last_traded_price(ticker, today_date)
+            if hist_price is not None:
+                latest_price = hist_price
+            return {"symbol": symbol, "price": latest_price, "volume": 0}
+
         return {
             "symbol": symbol,
             "price": latest_price,
