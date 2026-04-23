@@ -1,4 +1,3 @@
-from typing import Self
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -6,6 +5,10 @@ import logging
 import requests
 import datetime
 import pytz
+import smtplib
+import os
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from http.server import BaseHTTPRequestHandler
 # ==========================================
 # CONFIGURATION
@@ -26,6 +29,17 @@ APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyhdbIDYjOOJab7Oibhyt
 
 FETCH_TIMES = ["09:30", "11:00", "12:30", "14:30", "15:00"]
 TIMEZONE = "Asia/Kolkata"
+
+# ==========================================
+# EMAIL ALERT CONFIGURATION
+# ==========================================
+SMTP_SERVER   = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
+SMTP_EMAIL    = os.environ.get("SMTP_EMAIL", "example@gmail.com")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "123456")
+TO_EMAIL      = os.environ.get("TO_EMAIL", "example2@gmail.com")
+
+PRICE_CHANGE_THRESHOLD = 5.0   # percent — alert if |change| >= this value
 
 # ==========================================
 # FETCHING LOGIC
@@ -114,6 +128,155 @@ def fetch_all_data(target_slot, now_dt):
                 results[data["symbol"]] = data
     return results
 
+# ==========================================
+# PRICE CHANGE ALERT LOGIC
+# ==========================================
+def get_day_open_price(symbol, today_date):
+    """
+    Returns the market-open price for `symbol` on `today_date`.
+    Uses the first available 1-minute candle for the day.
+    Falls back to the daily 'Open' field if 1-minute data is unavailable.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="1d", interval="1m")
+        if not df.empty:
+            df_today = df[df.index.date == today_date]
+            if not df_today.empty:
+                return float(df_today.iloc[0]['Open'])
+        # Fallback: daily open
+        df_daily = ticker.history(period="5d", interval="1d")
+        if not df_daily.empty:
+            df_today_d = df_daily[df_daily.index.date == today_date]
+            if not df_today_d.empty:
+                return float(df_today_d.iloc[0]['Open'])
+    except Exception:
+        pass
+    return None
+
+
+def check_and_alert_price_changes(market_data, now_dt):
+    """
+    Compares each stock's current price against today's open price.
+    Sends an alert email for any stock whose change >= PRICE_CHANGE_THRESHOLD %.
+    """
+    today_date = now_dt.date()
+    alerts = []
+
+    def _check(symbol, current_price):
+        open_price = get_day_open_price(symbol, today_date)
+        if open_price and open_price > 0:
+            pct_change = ((current_price - open_price) / open_price) * 100
+            if abs(pct_change) >= PRICE_CHANGE_THRESHOLD:
+                return {
+                    "symbol": symbol,
+                    "open_price": open_price,
+                    "current_price": current_price,
+                    "pct_change": pct_change
+                }
+        return None
+
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = [
+            executor.submit(_check, sym, info["price"])
+            for sym, info in market_data.items()
+            if "price" in info
+        ]
+        for f in futures:
+            result = f.result()
+            if result:
+                alerts.append(result)
+
+    if alerts:
+        send_price_alert_email(alerts, now_dt)
+    return alerts
+
+
+def send_price_alert_email(alerts, now_dt):
+    """Sends an HTML email listing all stocks with >5% intraday price change."""
+    if not SMTP_EMAIL or not SMTP_PASSWORD:
+        logging.warning("SMTP credentials not set — skipping alert email.")
+        return
+
+    date_str = now_dt.strftime("%Y-%m-%d")
+    time_str = now_dt.strftime("%H:%M")
+
+    rows_html = ""
+    for a in sorted(alerts, key=lambda x: abs(x["pct_change"]), reverse=True):
+        direction = "▲" if a["pct_change"] > 0 else "▼"
+        color     = "#27ae60" if a["pct_change"] > 0 else "#e74c3c"
+        rows_html += f"""
+        <tr>
+          <td style='text-align:left;font-weight:bold;padding:8px 12px;border-bottom:1px solid #eee'>{a['symbol']}</td>
+          <td style='text-align:right;padding:8px 12px;border-bottom:1px solid #eee'>&#8377;{a['open_price']:.2f}</td>
+          <td style='text-align:right;padding:8px 12px;border-bottom:1px solid #eee'>&#8377;{a['current_price']:.2f}</td>
+          <td style='text-align:right;font-weight:bold;color:{color};padding:8px 12px;border-bottom:1px solid #eee'>{direction} {abs(a['pct_change']):.2f}%</td>
+        </tr>"""
+
+    html = f"""
+    <html><head><meta charset='UTF-8'></head>
+    <body style='margin:0;padding:0;background:#f4f6f9;font-family:Arial,sans-serif'>
+      <table width='100%' cellpadding='0' cellspacing='0' style='background:#f4f6f9;padding:30px 0'>
+        <tr><td align='center'>
+          <table width='620' cellpadding='0' cellspacing='0'
+                 style='background:#ffffff;border-radius:8px;overflow:hidden;
+                        box-shadow:0 2px 8px rgba(0,0,0,0.08)'>
+            <!-- Header -->
+            <tr>
+              <td style='background:#c0392b;padding:24px 32px'>
+                <h2 style='margin:0;color:#ffffff;font-size:20px'>&#9888; Price Alert — {date_str} @ {time_str}</h2>
+                <p style='margin:6px 0 0;color:#f8c8c8;font-size:13px'>
+                  {len(alerts)} stock(s) moved more than {PRICE_CHANGE_THRESHOLD}% from today's open
+                </p>
+              </td>
+            </tr>
+            <!-- Table -->
+            <tr>
+              <td style='padding:24px 32px'>
+                <table width='100%' cellpadding='0' cellspacing='0'
+                       style='border-collapse:collapse;font-size:14px'>
+                  <thead>
+                    <tr style='background:#f8f9fa'>
+                      <th style='text-align:left;padding:10px 12px;color:#555;font-weight:600;border-bottom:2px solid #dee2e6'>Symbol</th>
+                      <th style='text-align:right;padding:10px 12px;color:#555;font-weight:600;border-bottom:2px solid #dee2e6'>Open</th>
+                      <th style='text-align:right;padding:10px 12px;color:#555;font-weight:600;border-bottom:2px solid #dee2e6'>Current</th>
+                      <th style='text-align:right;padding:10px 12px;color:#555;font-weight:600;border-bottom:2px solid #dee2e6'>Change</th>
+                    </tr>
+                  </thead>
+                  <tbody>{rows_html}</tbody>
+                </table>
+              </td>
+            </tr>
+            <!-- Footer -->
+            <tr>
+              <td style='background:#f8f9fa;padding:16px 32px;text-align:center;
+                         color:#999;font-size:12px;border-top:1px solid #eee'>
+                Atlas Capital Automation &bull; Intraday Alert System
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </body></html>
+    """
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"🚨 Price Alert: {len(alerts)} stock(s) moved >{PRICE_CHANGE_THRESHOLD}% | {date_str}"
+        msg["From"]    = SMTP_EMAIL
+        msg["To"]      = TO_EMAIL
+        msg.attach(MIMEText(html, "html"))
+
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.sendmail(SMTP_EMAIL, TO_EMAIL, msg.as_string())
+        server.quit()
+        logging.info(f"Price alert email sent for {len(alerts)} stocks.")
+    except Exception as e:
+        logging.error(f"Failed to send price alert email: {e}")
+
+
 def get_target_slot(now):
     time_str = now.strftime("%H:%M")
     
@@ -164,6 +327,9 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(b"Failed to fetch market data from Yahoo Finance.")
             return
 
+        # ── Price Change Alert ────────────────────────────────────────────────
+        alerts = check_and_alert_price_changes(market_data, now)
+
         # Payload structure expected by Google Apps Script
         payload = {
             "date": date_str,
@@ -192,6 +358,7 @@ class handler(BaseHTTPRequestHandler):
         response_data = {
             "status": "success",
             "time_slot": target_slot,
-            "symbols_fetched": len(market_data)
+            "symbols_fetched": len(market_data),
+            "price_alerts_sent": len(alerts)
         }
         self.wfile.write(json.dumps(response_data).encode('utf-8'))
