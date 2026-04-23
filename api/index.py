@@ -10,6 +10,11 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from http.server import BaseHTTPRequestHandler
+from dotenv import load_dotenv
+
+# Load .env from the project root (one level above this api/ folder)
+_ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(_ENV_PATH)
 # ==========================================
 # CONFIGURATION
 # ==========================================
@@ -37,8 +42,8 @@ SMTP_SERVER   = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
 SMTP_EMAIL    = os.environ.get("SMTP_EMAIL", "example@gmail.com")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "123456")
-TO_EMAIL      = os.environ.get("TO_EMAIL", "example2@gmail.com")
-
+# Comma-separated list of recipients, e.g. "a@gmail.com,b@gmail.com"
+TO_EMAILS     = [e.strip() for e in os.environ.get("TO_EMAIL", "example2@gmail.com").split(",") if e.strip()]
 PRICE_CHANGE_THRESHOLD = 5.0   # percent — alert if |change| >= this value
 
 # ==========================================
@@ -264,15 +269,15 @@ def send_price_alert_email(alerts, now_dt):
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"🚨 Price Alert: {len(alerts)} stock(s) moved >{PRICE_CHANGE_THRESHOLD}% | {date_str}"
         msg["From"]    = SMTP_EMAIL
-        msg["To"]      = TO_EMAIL
+        msg["To"]      = ", ".join(TO_EMAILS)   # shows all recipients in the header
         msg.attach(MIMEText(html, "html"))
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.sendmail(SMTP_EMAIL, TO_EMAIL, msg.as_string())
+        server.sendmail(SMTP_EMAIL, TO_EMAILS, msg.as_string())  # list delivers to each
         server.quit()
-        logging.info(f"Price alert email sent for {len(alerts)} stocks.")
+        logging.info(f"Price alert email sent to {len(TO_EMAILS)} recipient(s) for {len(alerts)} stocks.")
     except Exception as e:
         logging.error(f"Failed to send price alert email: {e}")
 
