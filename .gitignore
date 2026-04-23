@@ -1,2 +1,3 @@
 api/__pycache__/
 .env
+api/sent_alerts.json

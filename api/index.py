@@ -160,15 +160,55 @@ def get_day_open_price(symbol, today_date):
     return None
 
 
+# ==========================================
+# ALERT DEDUPLICATION (one email per stock per day)
+# ==========================================
+_ALERTS_LEDGER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sent_alerts.json")
+
+def _load_sent_alerts(date_str):
+    """Returns the set of symbols already alerted on the given date."""
+    try:
+        with open(_ALERTS_LEDGER, "r") as f:
+            ledger = json.load(f)
+        return set(ledger.get(date_str, []))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+def _save_sent_alerts(date_str, symbols):
+    """Appends `symbols` to the ledger for `date_str` and prunes old dates."""
+    try:
+        with open(_ALERTS_LEDGER, "r") as f:
+            ledger = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        ledger = {}
+
+    existing = set(ledger.get(date_str, []))
+    existing.update(symbols)
+    ledger[date_str] = list(existing)
+
+    # Keep only the last 7 days to avoid unbounded growth
+    cutoff = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+    ledger = {d: v for d, v in ledger.items() if d >= cutoff}
+
+    with open(_ALERTS_LEDGER, "w") as f:
+        json.dump(ledger, f, indent=2)
+
+
 def check_and_alert_price_changes(market_data, now_dt):
     """
     Compares each stock's current price against today's open price.
     Sends an alert email for any stock whose change >= PRICE_CHANGE_THRESHOLD %.
+    Each stock is alerted at most ONCE per calendar day.
     """
     today_date = now_dt.date()
+    date_str   = today_date.isoformat()
+    already_sent = _load_sent_alerts(date_str)
     alerts = []
 
     def _check(symbol, current_price):
+        # Skip if we already sent an alert for this symbol today
+        if symbol in already_sent:
+            return None
         open_price = get_day_open_price(symbol, today_date)
         if open_price and open_price > 0:
             pct_change = ((current_price - open_price) / open_price) * 100
@@ -194,6 +234,9 @@ def check_and_alert_price_changes(market_data, now_dt):
 
     if alerts:
         send_price_alert_email(alerts, now_dt)
+        # Record these symbols so they won't trigger another email today
+        _save_sent_alerts(date_str, [a["symbol"] for a in alerts])
+        logging.info(f"Alerted {len(alerts)} symbol(s) today; ledger updated.")
     return alerts
 
 
