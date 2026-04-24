@@ -1,0 +1,331 @@
+"""
+hourly_alert.py
+---------------
+Standalone serverless handler (Vercel /api/hourly_alert) that:
+  - Runs every hour via an external cron (e.g. cron-job.org / Vercel Cron)
+  - For each stock, compares the *current* intraday price against the
+    *previous trading day's closing price*
+  - Sends ONE batched alert email per hourly run when BOTH conditions are met:
+      1. |price change vs prev close| >= HOURLY_PRICE_CHANGE_THRESHOLD (5%)
+      2. Cumulative intraday volume > VOLUME_THRESHOLD (5 000)
+  - All qualifying stocks are collected first, then a single SMTP call sends
+    one email to all recipients — no duplicate emails within the same run.
+
+The existing index.py interval-reporting pipeline is left completely untouched.
+"""
+
+import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor
+import logging
+import datetime
+import pytz
+import smtplib
+import os
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from http.server import BaseHTTPRequestHandler
+from dotenv import load_dotenv
+
+# ── Load env vars ──────────────────────────────────────────────────────────────
+_ENV_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+)
+load_dotenv(_ENV_PATH)
+
+logging.basicConfig(level=logging.INFO)
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+COMPANY_SYMBOLS = [
+    "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS",
+    "AIRFLOA.BO", "TITAGARH.NS", "BEML.NS", "ZODIAC.NS", "SAHAJSOLAR-SM.NS",
+    "SOLARIUM.BO", "GULPOLY.BO", "GAEL.BO", "SUKHJITS.NS",
+    "SRSOLTD.BO", "PRIMECAB-SM.NS", "DYCL.BO", "VMARCIND-SM.NS",
+]
+INDEX_SYMBOLS = ["^NSEI", "NIFTY_SME_EMERGE.NS"]
+ALL_SYMBOLS   = COMPANY_SYMBOLS + INDEX_SYMBOLS
+
+TIMEZONE = "Asia/Kolkata"
+
+# Thresholds
+HOURLY_PRICE_CHANGE_THRESHOLD = 5.0    # percent — alert if |change vs prev close| >= this
+VOLUME_THRESHOLD              = 5_000  # cumulative intraday volume must exceed this
+
+# SMTP / email settings (from .env)
+SMTP_SERVER   = os.environ.get("SMTP_SERVER",   "smtp.gmail.com")
+SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
+SMTP_EMAIL    = os.environ.get("SMTP_EMAIL",    "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+TO_EMAILS     = [
+    e.strip()
+    for e in os.environ.get("TO_EMAIL", "").split(",")
+    if e.strip()
+]
+
+
+# ==========================================
+# DATA FETCHING
+# ==========================================
+
+def _get_prev_close(ticker, today_date) -> float | None:
+    """
+    Returns the closing price of the most recent trading day BEFORE today.
+    Looks back up to 10 days to handle long weekends / holidays.
+    """
+    try:
+        df = ticker.history(period="10d", interval="1d")
+        if df.empty:
+            return None
+        df_prev = df[df.index.date < today_date]
+        if df_prev.empty:
+            return None
+        return float(df_prev.iloc[-1]["Close"])
+    except Exception:
+        return None
+
+
+def _fetch_symbol(symbol: str, today_date) -> dict | None:
+    """
+    Fetches intraday data for `symbol` and returns a dict with:
+      symbol, current_price, prev_close, pct_change, volume
+    Returns None if data is insufficient to evaluate.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+
+        # ── Intraday 1-minute bars ─────────────────────────────────────────────
+        df = ticker.history(period="1d", interval="1m")
+        if df.empty:
+            return None
+
+        df_today = df[df.index.date == today_date]
+        if df_today.empty:
+            return None  # Not traded today — nothing to alert on
+
+        current_price = float(df_today.iloc[-1]["Close"])
+        cum_volume    = int(df_today["Volume"].sum())
+
+        # ── Previous day's close ───────────────────────────────────────────────
+        prev_close = _get_prev_close(ticker, today_date)
+        if prev_close is None or prev_close == 0:
+            return None
+
+        pct_change = ((current_price - prev_close) / prev_close) * 100
+
+        return {
+            "symbol":        symbol,
+            "current_price": current_price,
+            "prev_close":    prev_close,
+            "pct_change":    pct_change,
+            "volume":        cum_volume,
+        }
+    except Exception as e:
+        logging.warning(f"[hourly_alert] Error fetching {symbol}: {e}")
+        return None
+
+
+def fetch_all(today_date) -> list[dict]:
+    """Fetches data for all symbols in parallel and returns raw results."""
+    results = []
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {
+            executor.submit(_fetch_symbol, sym, today_date): sym
+            for sym in ALL_SYMBOLS
+        }
+        for future in futures:
+            data = future.result()
+            if data is not None:
+                results.append(data)
+    return results
+
+
+# ==========================================
+# ALERT EVALUATION
+# ==========================================
+def evaluate_alerts(all_data: list[dict]) -> list[dict]:
+    """
+    Filters stocks that breach BOTH thresholds.
+    Returns list of alert dicts ready for the email.
+    """
+    alerts = []
+
+    for row in all_data:
+        sym = row["symbol"]
+        price_ok  = abs(row["pct_change"]) >= HOURLY_PRICE_CHANGE_THRESHOLD
+        volume_ok = row["volume"] > VOLUME_THRESHOLD
+
+        if price_ok and volume_ok:
+            alerts.append(row)
+            logging.info(
+                f"[hourly_alert] ALERT: {sym} | "
+                f"Prev close ₹{row['prev_close']:.2f} → "
+                f"Current ₹{row['current_price']:.2f} "
+                f"({row['pct_change']:+.2f}%) | Vol {row['volume']:,}"
+            )
+
+    return alerts
+
+
+# ==========================================
+# EMAIL
+# ==========================================
+def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bool:
+    """
+    Sends ONE HTML alert email to ALL configured recipients.
+    Each recipient receives the same message (BCC-style via sendmail list).
+    Returns True on success, False on failure.
+    """
+    if not SMTP_EMAIL or not SMTP_PASSWORD:
+        logging.warning("[hourly_alert] SMTP credentials missing — skipping email.")
+        return False
+    if not TO_EMAILS:
+        logging.warning("[hourly_alert] No recipients configured — skipping email.")
+        return False
+
+    date_str = now_dt.strftime("%Y-%m-%d")
+    time_str = now_dt.strftime("%H:%M")
+
+    # ── Build HTML rows ────────────────────────────────────────────────────────
+    rows_html = ""
+    for a in sorted(alerts, key=lambda x: abs(x["pct_change"]), reverse=True):
+        direction = "▲" if a["pct_change"] > 0 else "▼"
+        color     = "#27ae60" if a["pct_change"] > 0 else "#e74c3c"
+        rows_html += f"""
+        <tr>
+          <td style='text-align:left;font-weight:bold;padding:9px 14px;border-bottom:1px solid #eee'>{a['symbol']}</td>
+          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #eee'>&#8377;{a['prev_close']:.2f}</td>
+          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #eee'>&#8377;{a['current_price']:.2f}</td>
+          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #eee'>{a['volume']:,}</td>
+          <td style='text-align:right;font-weight:bold;color:{color};padding:9px 14px;border-bottom:1px solid #eee'>{direction} {abs(a['pct_change']):.2f}%</td>
+        </tr>"""
+
+    html = f"""
+    <html><head><meta charset='UTF-8'></head>
+    <body style='margin:0;padding:0;background:#f4f6f9;font-family:Arial,sans-serif'>
+      <table width='100%' cellpadding='0' cellspacing='0' style='background:#f4f6f9;padding:30px 0'>
+        <tr><td align='center'>
+          <table width='680' cellpadding='0' cellspacing='0'
+                 style='background:#ffffff;border-radius:8px;overflow:hidden;
+                        box-shadow:0 2px 10px rgba(0,0,0,0.10)'>
+            <!-- Header -->
+            <tr>
+              <td style='background:#1a3c5e;padding:24px 32px'>
+                <h2 style='margin:0;color:#f0c040;font-size:20px'>&#9200; Hourly Price Alert &mdash; {date_str} @ {time_str}</h2>
+                <p style='margin:6px 0 0;color:#a8c4e0;font-size:13px'>
+                  {len(alerts)} stock(s) moved &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
+                  with volume &gt; {VOLUME_THRESHOLD:,}
+                </p>
+              </td>
+            </tr>
+            <!-- Table -->
+            <tr>
+              <td style='padding:24px 32px'>
+                <table width='100%' cellpadding='0' cellspacing='0'
+                       style='border-collapse:collapse;font-size:14px'>
+                  <thead>
+                    <tr style='background:#f0f4f8'>
+                      <th style='text-align:left;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Symbol</th>
+                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Prev Close</th>
+                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Current Price</th>
+                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Volume</th>
+                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Change</th>
+                    </tr>
+                  </thead>
+                  <tbody>{rows_html}</tbody>
+                </table>
+              </td>
+            </tr>
+            <!-- Note -->
+            <tr>
+              <td style='padding:0 32px 20px'>
+                <p style='margin:0;font-size:12px;color:#888'>
+                  &#8226; Alert triggered when price moves &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
+                  AND intraday volume exceeds {VOLUME_THRESHOLD:,} shares.
+                </p>
+              </td>
+            </tr>
+            <!-- Footer -->
+            <tr>
+              <td style='background:#f0f4f8;padding:16px 32px;text-align:center;
+                         color:#999;font-size:12px;border-top:1px solid #d0dce8'>
+                Atlas Capital Automation &bull; Hourly Alert System
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+    </body></html>
+    """
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = (
+            f"\U0001f514 Hourly Alert: {len(alerts)} stock(s) moved "
+            f">{HOURLY_PRICE_CHANGE_THRESHOLD}% from prev close | {date_str} {time_str}"
+        )
+        msg["From"] = SMTP_EMAIL
+        msg["To"]   = ", ".join(TO_EMAILS)
+        msg.attach(MIMEText(html, "html"))
+
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        # sendmail with a list delivers one copy to every address in the list
+        server.sendmail(SMTP_EMAIL, TO_EMAILS, msg.as_string())
+        server.quit()
+
+        logging.info(
+            f"[hourly_alert] Email sent to {len(TO_EMAILS)} recipient(s) "
+            f"for {len(alerts)} stock(s)."
+        )
+        return True
+    except Exception as e:
+        logging.error(f"[hourly_alert] Failed to send email: {e}")
+        return False
+
+
+# ==========================================
+# SERVERLESS HANDLER  (GET /api/hourly_alert)
+# ==========================================
+class handler(BaseHTTPRequestHandler):
+    """
+    Vercel serverless entry-point.
+    Wire up a cron that calls this endpoint every hour during market hours,
+    e.g. 09:15 – 15:30 IST on weekdays.
+    """
+
+    def do_GET(self):
+        tz      = pytz.timezone(TIMEZONE)
+        now     = datetime.datetime.now(tz)
+        today   = now.date()
+        date_str = today.isoformat()
+
+        logging.info(f"[hourly_alert] Triggered at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+        # ── Fetch all symbols ──────────────────────────────────────────────────
+        all_data = fetch_all(today)
+        logging.info(f"[hourly_alert] Fetched data for {len(all_data)} symbol(s).")
+
+        # ── Evaluate which symbols breach both thresholds ──────────────────────
+        alerts = evaluate_alerts(all_data)
+
+        # ── Send ONE batched email if any alerts ───────────────────────────────
+        email_sent = False
+        if alerts:
+            email_sent = send_hourly_alert_email(alerts, now)
+
+        # ── HTTP response ──────────────────────────────────────────────────────
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+
+        response = {
+            "status":          "ok",
+            "timestamp":       now.isoformat(),
+            "symbols_checked": len(all_data),
+            "alerts_fired":    len(alerts),
+            "alert_symbols":   [a["symbol"] for a in alerts],
+            "email_sent":      email_sent,
+        }
+        self.wfile.write(json.dumps(response, indent=2).encode("utf-8"))
