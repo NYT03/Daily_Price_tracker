@@ -26,13 +26,15 @@ COMPANY_SYMBOLS = [
 ]
 
 # Email Configuration - Set these in Vercel Environment Variables
-SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "example@gmail.com")  # e.g., your_email@gmail.com
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "123455") # App Password
-# Split the TO_EMAIL by comma to allow multiple recipients
-TO_EMAILS = [email.strip() for email in os.environ.get("TO_EMAIL", "example2@gmail.com").split(",") if email.strip()]
-
+SMTP_SERVER   = os.environ.get("SMTP_SERVER",   "smtp.gmail.com")
+SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
+SMTP_EMAIL    = os.environ.get("SMTP_EMAIL",    "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+TO_EMAILS     = [
+    e.strip()
+    for e in os.environ.get("TO_EMAIL", "").split(",")
+    if e.strip()
+]
 # ==========================================
 # WEEKLY RETURN LOGIC  (via Yahoo Finance)
 # ==========================================
