@@ -1,11 +1,5 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "./index.js",
-      "use": "@vercel/node"
-    }
-  ],
+  "version": 3,
   "routes": [
     { "src": "/api/weekly", "dest": "/api/weekly.py" },
     { "src": "/api/hourly_alert", "dest": "/api/hourly_alert.py" },
