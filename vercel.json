@@ -1,7 +1,1 @@
-{
-  "routes": [
-    { "src": "/api/hourly_alert", "dest": "/api/hourly_alert.py" },
-    { "src": "/api/weekly", "dest": "/api/weekly.py" },
-    { "src": "/api/(.*)", "dest": "/api/index.py" }
-  ]
-}
+{}
