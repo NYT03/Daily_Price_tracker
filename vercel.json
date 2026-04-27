@@ -1,7 +1,7 @@
 {
-  "rewrites": [
-    { "source": "/api/weekly", "destination": "/api/weekly.py" },
-    { "source": "/api/hourly_alert", "destination": "/api/hourly_alert.py" },
-    { "source": "/", "destination": "/api/index.py" }
+    "routes": [
+    { "src": "/api/weekly", "dest": "/api/weekly.py" },
+    { "src": "/api/hourly_alert", "dest": "/api/hourly_alert.py" },
+    { "src": "/", "dest": "/api/index.py" }
   ]
 }
