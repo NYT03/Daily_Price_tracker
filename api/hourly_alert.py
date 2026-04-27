@@ -25,6 +25,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from http.server import BaseHTTPRequestHandler
 from dotenv import load_dotenv
+import json
+import requests
 
 # ── Load env vars ──────────────────────────────────────────────────────────────
 _ENV_PATH = os.path.join(
@@ -33,6 +35,50 @@ _ENV_PATH = os.path.join(
 load_dotenv(_ENV_PATH)
 
 logging.basicConfig(level=logging.INFO)
+
+# Global variable for best-effort cooldown in serverless environment
+_LAST_EMAIL_SENT_TIME = None
+# Dictionary to track stocks that have already been alerted today to prevent duplicates
+# Format: { "SYMBOL": "YYYY-MM-DD" }
+_ALERTED_STOCKS_TODAY = {}
+
+# Vercel KV integration for persistence
+KV_REST_API_URL = os.environ.get("KV_REST_API_URL")
+KV_REST_API_TOKEN = os.environ.get("KV_REST_API_TOKEN")
+
+def load_alerted_stocks() -> dict:
+    if not KV_REST_API_URL or not KV_REST_API_TOKEN:
+        return _ALERTED_STOCKS_TODAY
+    try:
+        resp = requests.post(
+            KV_REST_API_URL,
+            headers={"Authorization": f"Bearer {KV_REST_API_TOKEN}"},
+            json=["GET", "alerted_stocks_today"],
+            timeout=5
+        )
+        if resp.status_code == 200:
+            val = resp.json().get("result")
+            if val:
+                return json.loads(val)
+    except Exception as e:
+        logging.error(f"[hourly_alert] Error reading from KV: {e}")
+    return _ALERTED_STOCKS_TODAY
+
+def save_alerted_stocks(alerts_dict: dict, today_str: str):
+    if not KV_REST_API_URL or not KV_REST_API_TOKEN:
+        return
+    try:
+        # Keep only today's alerts to save space
+        pruned = {k: v for k, v in alerts_dict.items() if v == today_str}
+        val = json.dumps(pruned)
+        requests.post(
+            KV_REST_API_URL,
+            headers={"Authorization": f"Bearer {KV_REST_API_TOKEN}"},
+            json=["SET", "alerted_stocks_today", val, "EX", 172800],
+            timeout=5
+        )
+    except Exception as e:
+        logging.error(f"[hourly_alert] Error saving to KV: {e}")
 
 # ==========================================
 # CONFIGURATION
@@ -143,15 +189,21 @@ def fetch_all(today_date) -> list[dict]:
 # ==========================================
 # ALERT EVALUATION
 # ==========================================
-def evaluate_alerts(all_data: list[dict]) -> list[dict]:
+def evaluate_alerts(all_data: list[dict], today_date: datetime.date) -> list[dict]:
     """
     Filters stocks that breach BOTH thresholds.
     Returns list of alert dicts ready for the email.
     """
     alerts = []
+    date_str = today_date.isoformat()
 
     for row in all_data:
         sym = row["symbol"]
+
+        # Skip if we already sent an email for this stock today
+        if _ALERTED_STOCKS_TODAY.get(sym) == date_str:
+            continue
+
         price_ok  = abs(row["pct_change"]) >= HOURLY_PRICE_CHANGE_THRESHOLD
         volume_ok = row["volume"] > VOLUME_THRESHOLD
 
@@ -176,6 +228,14 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
     Each recipient receives the same message (BCC-style via sendmail list).
     Returns True on success, False on failure.
     """
+    global _LAST_EMAIL_SENT_TIME, _ALERTED_STOCKS_TODAY
+    
+    if _LAST_EMAIL_SENT_TIME is not None:
+        elapsed = now_dt - _LAST_EMAIL_SENT_TIME
+        if elapsed < datetime.timedelta(minutes=1):
+            logging.info(f"[hourly_alert] Cooldown active (1 min). Skipping email. Last sent at {_LAST_EMAIL_SENT_TIME.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            return False
+
     if not SMTP_EMAIL or not SMTP_PASSWORD:
         logging.warning("[hourly_alert] SMTP credentials missing — skipping email.")
         return False
@@ -211,7 +271,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
             <!-- Header -->
             <tr>
               <td style='background:#1a3c5e;padding:24px 32px'>
-                <h2 style='margin:0;color:#f0c040;font-size:20px'>&#9200; Hourly Price Alert &mdash; {date_str} @ {time_str}</h2>
+                <h2 style='margin:0;color:#f0c040;font-size:20px'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
                 <p style='margin:6px 0 0;color:#a8c4e0;font-size:13px'>
                   {len(alerts)} stock(s) moved &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
                   with volume &gt; {VOLUME_THRESHOLD:,}
@@ -249,7 +309,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
             <tr>
               <td style='background:#f0f4f8;padding:16px 32px;text-align:center;
                          color:#999;font-size:12px;border-top:1px solid #d0dce8'>
-                Atlas Capital Automation &bull; Hourly Alert System
+                Atlas Capital Automation &bull; Intraday Alert System
               </td>
             </tr>
           </table>
@@ -261,7 +321,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = (
-            f"\U0001f514 Hourly Alert: {len(alerts)} stock(s) moved "
+            f"\U0001f514 Intraday Alert: {len(alerts)} stock(s) moved "
             f">{HOURLY_PRICE_CHANGE_THRESHOLD}% from prev close | {date_str} {time_str}"
         )
         msg["From"] = SMTP_EMAIL
@@ -274,6 +334,11 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         # sendmail with a list delivers one copy to every address in the list
         server.sendmail(SMTP_EMAIL, TO_EMAILS, msg.as_string())
         server.quit()
+
+        _LAST_EMAIL_SENT_TIME = now_dt
+        # Record the stocks as alerted for today
+        for a in alerts:
+            _ALERTED_STOCKS_TODAY[a["symbol"]] = date_str
 
         logging.info(
             f"[hourly_alert] Email sent to {len(TO_EMAILS)} recipient(s) "
@@ -296,10 +361,14 @@ class handler(BaseHTTPRequestHandler):
     """
 
     def do_GET(self):
+        global _ALERTED_STOCKS_TODAY
         tz      = pytz.timezone(TIMEZONE)
         now     = datetime.datetime.now(tz)
         today   = now.date()
         date_str = today.isoformat()
+
+        # Load persisted state from KV
+        _ALERTED_STOCKS_TODAY = load_alerted_stocks()
 
         logging.info(f"[hourly_alert] Triggered at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
@@ -308,12 +377,14 @@ class handler(BaseHTTPRequestHandler):
         logging.info(f"[hourly_alert] Fetched data for {len(all_data)} symbol(s).")
 
         # ── Evaluate which symbols breach both thresholds ──────────────────────
-        alerts = evaluate_alerts(all_data)
+        alerts = evaluate_alerts(all_data, today)
 
         # ── Send ONE batched email if any alerts ───────────────────────────────
         email_sent = False
         if alerts:
             email_sent = send_hourly_alert_email(alerts, now)
+            if email_sent:
+                save_alerted_stocks(_ALERTED_STOCKS_TODAY, date_str)
 
         # ── HTTP response ──────────────────────────────────────────────────────
         self.send_response(200)
