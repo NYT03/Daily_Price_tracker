@@ -1,7 +1,3 @@
 {
-  "rewrites": [
-    { "source": "/api/weekly", "destination": "/api/index.py" },
-    { "source": "/api/hourly_alert", "destination": "/api/index.py" },
-    { "source": "/(.*)", "destination": "/api/index.py" }
-  ]
+
 }
