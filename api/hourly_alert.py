@@ -7,7 +7,7 @@ Standalone serverless handler (Vercel /api/hourly_alert) that:
     *previous trading day's closing price*
   - Sends ONE batched alert email per hourly run when BOTH conditions are met:
       1. |price change vs prev close| >= HOURLY_PRICE_CHANGE_THRESHOLD (5%)
-      2. Cumulative intraday volume > VOLUME_THRESHOLD (5 000)
+      2. Cumulative intraday volume > VOLUME_THRESHOLD (20 000)
   - All qualifying stocks are collected first, then a single SMTP call sends
     one email to all recipients — no duplicate emails within the same run.
 
@@ -84,10 +84,10 @@ def save_alerted_stocks(alerts_dict: dict, today_str: str):
 # CONFIGURATION
 # ==========================================
 COMPANY_SYMBOLS = [
-    "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS",
+    "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS", 
     "AIRFLOA.BO", "TITAGARH.NS", "BEML.NS", "ZODIAC.NS", "SAHAJSOLAR-SM.NS",
-    "SOLARIUM.BO", "GULPOLY.BO", "GAEL.BO", "SUKHJITS.NS",
-    "SRSOLTD.BO", "PRIMECAB-SM.NS", "DYCL.BO", "VMARCIND-SM.NS",
+    "SOLARIUM.BO", "GULPOLY.BO", "GAEL.BO", "SUKHJITS.NS", 
+    "SRSOLTD.BO", "PRIMECAB-SM.NS", "DYCL.BO", "VMARCIND-SM.NS"
 ]
 INDEX_SYMBOLS = ["^NSEI", "NIFTY_SME_EMERGE.NS"]
 ALL_SYMBOLS   = COMPANY_SYMBOLS + INDEX_SYMBOLS
@@ -118,17 +118,21 @@ def _get_prev_close(ticker, today_date) -> float | None:
     """
     Returns the closing price of the most recent trading day BEFORE today.
     Looks back up to 10 days to handle long weekends / holidays.
+    Falls back to ticker.info['previousClose'] if history is unavailable.
     """
     try:
         df = ticker.history(period="10d", interval="1d")
         if df.empty:
-            return None
+            return ticker.info.get("previousClose")
         df_prev = df[df.index.date < today_date]
         if df_prev.empty:
-            return None
+            return ticker.info.get("previousClose")
         return float(df_prev.iloc[-1]["Close"])
     except Exception:
-        return None
+        try:
+            return ticker.info.get("previousClose")
+        except Exception:
+            return None
 
 
 def _fetch_symbol(symbol: str, today_date) -> dict | None:
@@ -142,6 +146,7 @@ def _fetch_symbol(symbol: str, today_date) -> dict | None:
 
         # ── Intraday 1-minute bars ─────────────────────────────────────────────
         df = ticker.history(period="1d", interval="1m")
+        print(df)
         if df.empty:
             return None
 
@@ -183,6 +188,9 @@ def fetch_all(today_date) -> list[dict]:
             data = future.result()
             if data is not None:
                 results.append(data)
+        # for res in results:
+        #     print(res)
+        # print("\n")
     return results
 
 
@@ -199,14 +207,14 @@ def evaluate_alerts(all_data: list[dict], today_date: datetime.date) -> list[dic
 
     for row in all_data:
         sym = row["symbol"]
+        # print(row)
 
         # Skip if we already sent an email for this stock today
         if _ALERTED_STOCKS_TODAY.get(sym) == date_str:
             continue
 
         price_ok  = abs(row["pct_change"]) >= HOURLY_PRICE_CHANGE_THRESHOLD
-        volume_ok = row["volume"] > VOLUME_THRESHOLD
-
+        volume_ok = row["volume"] >= VOLUME_THRESHOLD
         if price_ok and volume_ok:
             alerts.append(row)
             logging.info(
@@ -385,3 +393,5 @@ def run_hourly_alert():
         "email_sent":      email_sent,
     }
     return response
+if __name__ == "__main__":
+    run_hourly_alert()

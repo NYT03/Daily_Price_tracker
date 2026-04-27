@@ -33,16 +33,24 @@ FETCH_TIMES = ["09:30", "11:00", "12:30", "14:30", "15:00"]
 TIMEZONE = "Asia/Kolkata"
 
 def get_last_traded_price(ticker, today_date):
-    df_hist = ticker.history(period="5d", interval="1d")
-    if df_hist.empty:
-        return None, False
+    try:
+        df_hist = ticker.history(period="5d", interval="1d")
+        if df_hist.empty:
+            return ticker.info.get("previousClose"), False
 
-    df_prev = df_hist[df_hist.index.date < today_date]
-    if df_prev.empty:
-        df_prev = df_hist
+        df_prev = df_hist[df_hist.index.date < today_date]
+        if df_prev.empty:
+            df_prev = df_hist
+            if df_prev.empty:
+                return ticker.info.get("previousClose"), False
 
-    last_close = float(df_prev.iloc[-1]['Close'])
-    return last_close, False
+        last_close = float(df_prev.iloc[-1]['Close'])
+        return last_close, False
+    except Exception:
+        try:
+            return ticker.info.get("previousClose"), False
+        except Exception:
+            return None, False
 
 def fetch_single(symbol, target_slot, now_dt):
     try:

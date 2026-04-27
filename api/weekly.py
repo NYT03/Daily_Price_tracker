@@ -64,12 +64,23 @@ def calculate_single_return(symbol):
         ticker = yf.Ticker(symbol)
         
         # Using 1 month to ensure we get data for the last two Fridays
-        hist = ticker.history(period="1mo")
-        if hist.empty:
-             return {"ticker": symbol, "error": "No data found on Yahoo Finance"}
+        try:
+            hist = ticker.history(period="1mo")
+        except Exception:
+            import pandas as pd
+            hist = pd.DataFrame()
 
         c_date, close_current = get_closest_close(hist, current_friday)
         l_date, close_last = get_closest_close(hist, last_friday)
+
+        if close_current is None:
+            try:
+                fallback_close = ticker.info.get("previousClose")
+                if fallback_close is not None:
+                    close_current = fallback_close
+                    c_date = current_friday
+            except Exception:
+                pass
 
         if close_current is None or close_last is None:
             return {"ticker": symbol, "error": "Missing price data for the target dates"}
