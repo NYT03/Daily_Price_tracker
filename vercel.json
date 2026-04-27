@@ -1,8 +1,7 @@
 {
-  "version": 3,
-  "routes": [
-    { "src": "/api/weekly", "dest": "/api/weekly.py" },
-    { "src": "/api/hourly_alert", "dest": "/api/hourly_alert.py" },
-    { "src": "/", "dest": "/api/index.py" }
+  "rewrites": [
+    { "source": "/api/weekly", "destination": "/api/index.py" },
+    { "source": "/api/hourly_alert", "destination": "/api/index.py" },
+    { "source": "/(.*)", "destination": "/api/index.py" }
   ]
 }

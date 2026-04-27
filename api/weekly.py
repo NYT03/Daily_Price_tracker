@@ -172,36 +172,25 @@ def send_email(html_content):
         print(f"Error sending email: {e}")
         return False, str(e)
 
-# ==========================================
-# SERVERLESS HANDLER
-# ==========================================
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        try:
-            print("Fetching weekly returns...")
-            results = get_all_weekly_returns()
-            
-            print("Formatting email...")
-            html_content = format_html_email(results)
-            
-            print("Sending email...")
-            email_success, email_msg = send_email(html_content)
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            
-            response_data = {
-                "status": "success",
-                "symbols_processed": len(results),
-                "email_sent": email_success,
-                "email_message": email_msg
-            }
-            self.wfile.write(json.dumps(response_data).encode('utf-8'))
-            
-        except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(f"An error occurred: {str(e)}".encode('utf-8'))
+def run_weekly_report():
+    try:
+        print("Fetching weekly returns...")
+        results = get_all_weekly_returns()
+        
+        print("Formatting email...")
+        html_content = format_html_email(results)
+        
+        print("Sending email...")
+        email_success, email_msg = send_email(html_content)
+        
+        response_data = {
+            "status": "success",
+            "symbols_processed": len(results),
+            "email_sent": email_success,
+            "email_message": email_msg
+        }
+        return response_data
+        
+    except Exception as e:
+        raise e
 

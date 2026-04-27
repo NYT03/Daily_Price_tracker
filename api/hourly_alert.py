@@ -96,7 +96,7 @@ TIMEZONE = "Asia/Kolkata"
 
 # Thresholds
 HOURLY_PRICE_CHANGE_THRESHOLD = 5.0    # percent — alert if |change vs prev close| >= this
-VOLUME_THRESHOLD              = 5_000  # cumulative intraday volume must exceed this
+VOLUME_THRESHOLD              = 20000  # cumulative intraday volume must exceed this
 
 # SMTP / email settings (from .env)
 SMTP_SERVER   = os.environ.get("SMTP_SERVER",   "smtp.gmail.com")
@@ -350,53 +350,38 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         return False
 
 
-# ==========================================
-# SERVERLESS HANDLER  (GET /api/hourly_alert)
-# ==========================================
-class handler(BaseHTTPRequestHandler):
-    """
-    Vercel serverless entry-point.
-    Wire up a cron that calls this endpoint every hour during market hours,
-    e.g. 09:15 – 15:30 IST on weekdays.
-    """
+def run_hourly_alert():
+    global _ALERTED_STOCKS_TODAY
+    tz      = pytz.timezone(TIMEZONE)
+    now     = datetime.datetime.now(tz)
+    today   = now.date()
+    date_str = today.isoformat()
 
-    def do_GET(self):
-        global _ALERTED_STOCKS_TODAY
-        tz      = pytz.timezone(TIMEZONE)
-        now     = datetime.datetime.now(tz)
-        today   = now.date()
-        date_str = today.isoformat()
+    # Load persisted state from KV
+    _ALERTED_STOCKS_TODAY = load_alerted_stocks()
 
-        # Load persisted state from KV
-        _ALERTED_STOCKS_TODAY = load_alerted_stocks()
+    logging.info(f"[hourly_alert] Triggered at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-        logging.info(f"[hourly_alert] Triggered at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    # ── Fetch all symbols ──────────────────────────────────────────────────
+    all_data = fetch_all(today)
+    logging.info(f"[hourly_alert] Fetched data for {len(all_data)} symbol(s).")
 
-        # ── Fetch all symbols ──────────────────────────────────────────────────
-        all_data = fetch_all(today)
-        logging.info(f"[hourly_alert] Fetched data for {len(all_data)} symbol(s).")
+    # ── Evaluate which symbols breach both thresholds ──────────────────────
+    alerts = evaluate_alerts(all_data, today)
 
-        # ── Evaluate which symbols breach both thresholds ──────────────────────
-        alerts = evaluate_alerts(all_data, today)
+    # ── Send ONE batched email if any alerts ───────────────────────────────
+    email_sent = False
+    if alerts:
+        email_sent = send_hourly_alert_email(alerts, now)
+        if email_sent:
+            save_alerted_stocks(_ALERTED_STOCKS_TODAY, date_str)
 
-        # ── Send ONE batched email if any alerts ───────────────────────────────
-        email_sent = False
-        if alerts:
-            email_sent = send_hourly_alert_email(alerts, now)
-            if email_sent:
-                save_alerted_stocks(_ALERTED_STOCKS_TODAY, date_str)
-
-        # ── HTTP response ──────────────────────────────────────────────────────
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
-
-        response = {
-            "status":          "ok",
-            "timestamp":       now.isoformat(),
-            "symbols_checked": len(all_data),
-            "alerts_fired":    len(alerts),
-            "alert_symbols":   [a["symbol"] for a in alerts],
-            "email_sent":      email_sent,
-        }
-        self.wfile.write(json.dumps(response, indent=2).encode("utf-8"))
+    response = {
+        "status":          "ok",
+        "timestamp":       now.isoformat(),
+        "symbols_checked": len(all_data),
+        "alerts_fired":    len(alerts),
+        "alert_symbols":   [a["symbol"] for a in alerts],
+        "email_sent":      email_sent,
+    }
+    return response
