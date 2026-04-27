@@ -23,6 +23,7 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from http.server import BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import json
@@ -261,26 +262,29 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         color     = "#27ae60" if a["pct_change"] > 0 else "#e74c3c"
         rows_html += f"""
         <tr>
-          <td style='text-align:left;font-weight:bold;padding:9px 14px;border-bottom:1px solid #eee'>{a['symbol']}</td>
-          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #eee'>&#8377;{a['prev_close']:.2f}</td>
-          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #eee'>&#8377;{a['current_price']:.2f}</td>
-          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #eee'>{a['volume']:,}</td>
-          <td style='text-align:right;font-weight:bold;color:{color};padding:9px 14px;border-bottom:1px solid #eee'>{direction} {abs(a['pct_change']):.2f}%</td>
+          <td style='text-align:left;font-weight:bold;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['symbol']}</td>
+          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['prev_close']:.2f}</td>
+          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['current_price']:.2f}</td>
+          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['volume']:,}</td>
+          <td style='text-align:right;font-weight:bold;color:{color};padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{direction} {abs(a['pct_change']):.2f}%</td>
         </tr>"""
 
     html = f"""
-    <html><head><meta charset='UTF-8'></head>
-    <body style='margin:0;padding:0;background:#f4f6f9;font-family:Arial,sans-serif'>
-      <table width='100%' cellpadding='0' cellspacing='0' style='background:#f4f6f9;padding:30px 0'>
+    <html><head><meta charset='UTF-8'>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    </head>
+    <body style='margin:0;padding:0;background:#F6F1E9;font-family:"minion Variable concept", "Montserrat", sans-serif;'>
+      <table width='100%' cellpadding='0' cellspacing='0' style='background:#F6F1E9;padding:30px 0'>
         <tr><td align='center'>
           <table width='680' cellpadding='0' cellspacing='0'
                  style='background:#ffffff;border-radius:8px;overflow:hidden;
                         box-shadow:0 2px 10px rgba(0,0,0,0.10)'>
             <!-- Header -->
             <tr>
-              <td style='background:#1a3c5e;padding:24px 32px'>
-                <h2 style='margin:0;color:#f0c040;font-size:20px'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
-                <p style='margin:6px 0 0;color:#a8c4e0;font-size:13px'>
+              <td style='background:#314568;padding:24px 32px;text-align:center;'>
+                <img src="cid:logo" alt="Atlas Capital" style="max-height: 60px; margin-bottom: 10px;" />
+                <h2 style='margin:0;color:#C6A962;font-size:20px;font-family:"Montserrat",sans-serif;'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
+                <p style='margin:6px 0 0;color:#D1DCE2;font-size:13px;font-family:"Montserrat",sans-serif;'>
                   {len(alerts)} stock(s) moved &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
                   with volume &gt; {VOLUME_THRESHOLD:,}
                 </p>
@@ -292,12 +296,12 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
                 <table width='100%' cellpadding='0' cellspacing='0'
                        style='border-collapse:collapse;font-size:14px'>
                   <thead>
-                    <tr style='background:#f0f4f8'>
-                      <th style='text-align:left;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Symbol</th>
-                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Prev Close</th>
-                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Current Price</th>
-                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Volume</th>
-                      <th style='text-align:right;padding:10px 14px;color:#1a3c5e;font-weight:700;border-bottom:2px solid #d0dce8'>Change</th>
+                    <tr style='background:#0D1B2A'>
+                      <th style='text-align:left;padding:10px 14px;color:#F6F1E9;font-weight:700;border-bottom:2px solid #314568;font-family:"Montserrat",sans-serif;'>Symbol</th>
+                      <th style='text-align:right;padding:10px 14px;color:#F6F1E9;font-weight:700;border-bottom:2px solid #314568;font-family:"Montserrat",sans-serif;'>Prev Close</th>
+                      <th style='text-align:right;padding:10px 14px;color:#F6F1E9;font-weight:700;border-bottom:2px solid #314568;font-family:"Montserrat",sans-serif;'>Current Price</th>
+                      <th style='text-align:right;padding:10px 14px;color:#F6F1E9;font-weight:700;border-bottom:2px solid #314568;font-family:"Montserrat",sans-serif;'>Volume</th>
+                      <th style='text-align:right;padding:10px 14px;color:#F6F1E9;font-weight:700;border-bottom:2px solid #314568;font-family:"Montserrat",sans-serif;'>Change</th>
                     </tr>
                   </thead>
                   <tbody>{rows_html}</tbody>
@@ -307,7 +311,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
             <!-- Note -->
             <tr>
               <td style='padding:0 32px 20px'>
-                <p style='margin:0;font-size:12px;color:#888'>
+                <p style='margin:0;font-size:12px;color:#607CA4;font-family:"Montserrat",sans-serif;'>
                   &#8226; Alert triggered when price moves &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
                   AND intraday volume exceeds {VOLUME_THRESHOLD:,} shares.
                 </p>
@@ -315,8 +319,8 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
             </tr>
             <!-- Footer -->
             <tr>
-              <td style='background:#f0f4f8;padding:16px 32px;text-align:center;
-                         color:#999;font-size:12px;border-top:1px solid #d0dce8'>
+              <td style='background:#0D1B2A;padding:16px 32px;text-align:center;
+                         color:#C6A962;font-size:12px;border-top:1px solid #314568;font-family:"Montserrat",sans-serif;'>
                 Atlas Capital Automation &bull; Intraday Alert System
               </td>
             </tr>
@@ -327,14 +331,27 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
     """
 
     try:
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("related")
         msg["Subject"] = (
             f"\U0001f514 Intraday Alert: {len(alerts)} stock(s) moved "
             f">{HOURLY_PRICE_CHANGE_THRESHOLD}% from prev close | {date_str} {time_str}"
         )
         msg["From"] = SMTP_EMAIL
         msg["To"]   = ", ".join(TO_EMAILS)
-        msg.attach(MIMEText(html, "html"))
+
+        msg_alt = MIMEMultipart("alternative")
+        msg.attach(msg_alt)
+        msg_alt.attach(MIMEText(html, "html"))
+
+        try:
+            with open(r"d:\Internship\Automation\logo.png", "rb") as f:
+                img_data = f.read()
+            image = MIMEImage(img_data, name="logo.png")
+            image.add_header('Content-ID', '<logo>')
+            image.add_header('Content-Disposition', 'inline', filename="logo.png")
+            msg.attach(image)
+        except Exception as e:
+            logging.warning(f"[hourly_alert] Could not attach logo: {e}")
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()

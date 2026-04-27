@@ -113,43 +113,61 @@ def format_html_email(results):
     html = f"""
     <html>
       <head>
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
         <style>
-          table {{ border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; }}
-          th, td {{ border: 1px solid #dddddd; text-align: right; padding: 8px; }}
-          th {{ background-color: #f2f2f2; text-align: center; }}
-          .positive {{ color: green; font-weight: bold; }}
-          .negative {{ color: red; font-weight: bold; }}
-          .ticker {{ text-align: left; font-weight: bold; }}
+          body {{ font-family: "minion Variable concept", "Montserrat", sans-serif; background-color: #F6F1E9; margin: 0; padding: 20px; }}
+          .container {{ background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 800px; margin: 0 auto; overflow: hidden; }}
+          .header {{ background-color: #314568; padding: 24px 32px; text-align: center; color: #C6A962; font-family: "Montserrat", sans-serif; }}
+          .header img {{ max-height: 60px; margin-bottom: 10px; }}
+          .content {{ padding: 24px 32px; }}
+          table {{ border-collapse: collapse; width: 100%; font-family: "Montserrat", sans-serif; font-size: 14px; }}
+          th, td {{ border-bottom: 1px solid #D1DCE2; text-align: right; padding: 12px 14px; }}
+          th {{ background-color: #0D1B2A; color: #F6F1E9; text-align: center; font-weight: bold; border-bottom: 2px solid #314568; }}
+          .positive {{ color: #27ae60; font-weight: bold; }}
+          .negative {{ color: #e74c3c; font-weight: bold; }}
+          .ticker {{ text-align: left; font-weight: bold; color: #314568; }}
+          .footer {{ background-color: #0D1B2A; padding: 16px 32px; text-align: center; color: #C6A962; font-size: 12px; font-family: "Montserrat", sans-serif; border-top: 1px solid #314568; }}
         </style>
       </head>
       <body>
-        <h2>Weekly Return Report - Week Ending {current_friday}</h2>
-        <table>
-          <tr>
-            <th>Ticker</th>
-            <th>Last Friday Close</th>
-            <th>Current Friday Close</th>
-            <th>Weekly Return (%)</th>
-          </tr>
+        <div class="container">
+          <div class="header">
+            <img src="cid:logo" alt="Atlas Capital" />
+            <h2 style="margin: 0;">Weekly Return Report</h2>
+            <p style="margin: 6px 0 0; color: #D1DCE2; font-size: 13px;">Week Ending {current_friday}</p>
+          </div>
+          <div class="content">
+            <table>
+              <tr>
+                <th style="text-align: left;">Ticker</th>
+                <th>Last Friday Close</th>
+                <th>Current Friday Close</th>
+                <th>Weekly Return (%)</th>
+              </tr>
     """
     
     for res in results:
         if "error" in res:
-            html += f"<tr><td class='ticker'>{res['ticker']}</td><td colspan='3'>Error: {res['error']}</td></tr>\n"
+            html += f"<tr><td class='ticker'>{res['ticker']}</td><td colspan='3' style='text-align: center;'>Error: {res['error']}</td></tr>\n"
         else:
             ret = res['weekly_return']
             color_class = "positive" if ret >= 0 else "negative"
             html += f"""
-            <tr>
-              <td class='ticker'>{res['ticker']}</td>
-              <td>{res['last_friday_close']:.2f} <br><small>({res['last_friday_date']})</small></td>
-              <td>{res['current_friday_close']:.2f} <br><small>({res['current_friday_date']})</small></td>
-              <td class='{color_class}'>{ret:.2f}%</td>
-            </tr>
+              <tr>
+                <td class='ticker'>{res['ticker']}</td>
+                <td>{res['last_friday_close']:.2f} <br><small style="color: #607CA4;">({res['last_friday_date']})</small></td>
+                <td>{res['current_friday_close']:.2f} <br><small style="color: #607CA4;">({res['current_friday_date']})</small></td>
+                <td class='{color_class}'>{ret:.2f}%</td>
+              </tr>
             """
             
     html += """
-        </table>
+            </table>
+          </div>
+          <div class="footer">
+            Atlas Capital Automation &bull; Weekly Report System
+          </div>
+        </div>
       </body>
     </html>
     """
@@ -165,13 +183,24 @@ def send_email(html_content):
         return False, "TO_EMAIL variable not set or invalid"
         
     try:
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("related")
         msg["Subject"] = f"Weekly Stock Returns - {datetime.today().date()}"
         msg["From"] = SMTP_EMAIL
         msg["To"] = ", ".join(TO_EMAILS)
 
-        part = MIMEText(html_content, "html")
-        msg.attach(part)
+        msg_alt = MIMEMultipart("alternative")
+        msg.attach(msg_alt)
+        msg_alt.attach(MIMEText(html_content, "html"))
+
+        try:
+            with open(r"d:\Internship\Automation\logo.png", "rb") as f:
+                img_data = f.read()
+            image = MIMEImage(img_data, name="logo.png")
+            image.add_header('Content-ID', '<logo>')
+            image.add_header('Content-Disposition', 'inline', filename="logo.png")
+            msg.attach(image)
+        except Exception as e:
+            print(f"Could not attach logo: {e}")
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
