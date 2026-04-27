@@ -147,7 +147,6 @@ def _fetch_symbol(symbol: str, today_date) -> dict | None:
 
         # ── Intraday 1-minute bars ─────────────────────────────────────────────
         df = ticker.history(period="1d", interval="1m")
-        print(df)
         if df.empty:
             return None
 
@@ -262,10 +261,10 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         color     = "#27ae60" if a["pct_change"] > 0 else "#e74c3c"
         rows_html += f"""
         <tr>
-          <td style='text-align:left;font-weight:bold;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['symbol']}</td>
-          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['prev_close']:.2f}</td>
-          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['current_price']:.2f}</td>
-          <td style='text-align:right;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['volume']:,}</td>
+          <td style='text-align:left;font-weight:bold;color:#314568;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['symbol']}</td>
+          <td style='text-align:right;color:#0D1B2A;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['prev_close']:.2f}</td>
+          <td style='text-align:right;color:#0D1B2A;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['current_price']:.2f}</td>
+          <td style='text-align:right;color:#0D1B2A;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['volume']:,}</td>
           <td style='text-align:right;font-weight:bold;color:{color};padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{direction} {abs(a['pct_change']):.2f}%</td>
         </tr>"""
 
@@ -281,13 +280,21 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
                         box-shadow:0 2px 10px rgba(0,0,0,0.10)'>
             <!-- Header -->
             <tr>
-              <td style='background:#314568;padding:24px 32px;text-align:center;'>
-                <img src="cid:logo" alt="Atlas Capital" style="max-height: 60px; margin-bottom: 10px;" />
-                <h2 style='margin:0;color:#C6A962;font-size:20px;font-family:"Montserrat",sans-serif;'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
-                <p style='margin:6px 0 0;color:#D1DCE2;font-size:13px;font-family:"Montserrat",sans-serif;'>
-                  {len(alerts)} stock(s) moved &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
-                  with volume &gt; {VOLUME_THRESHOLD:,}
-                </p>
+              <td style='background:#ffffff;padding:24px 32px;border-bottom:1px solid #D1DCE2;'>
+                <table width='100%' cellpadding='0' cellspacing='0'>
+                  <tr>
+                    <td width='80' style='vertical-align:middle;'>
+                      <img src="cid:logo" alt="Atlas Capital" style="max-height: 60px;" />
+                    </td>
+                    <td style='vertical-align:middle;text-align:left;padding-left:100px;'>
+                      <h2 style='margin:0;color:#314568;font-size:15px;font-family:"Montserrat",sans-serif;'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
+                      <p style='margin:6px 0 0;color:#607CA4;font-size:10px;font-family:"Montserrat",sans-serif;'>
+                        {len(alerts)} stock(s) moved &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
+                        with volume &gt; {VOLUME_THRESHOLD:,}
+                      </p>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
             <!-- Table -->
@@ -410,5 +417,3 @@ def run_hourly_alert():
         "email_sent":      email_sent,
     }
     return response
-if __name__ == "__main__":
-    run_hourly_alert()

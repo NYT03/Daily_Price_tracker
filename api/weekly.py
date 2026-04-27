@@ -117,11 +117,10 @@ def format_html_email(results):
         <style>
           body {{ font-family: "minion Variable concept", "Montserrat", sans-serif; background-color: #F6F1E9; margin: 0; padding: 20px; }}
           .container {{ background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 800px; margin: 0 auto; overflow: hidden; }}
-          .header {{ background-color: #314568; padding: 24px 32px; text-align: center; color: #C6A962; font-family: "Montserrat", sans-serif; }}
-          .header img {{ max-height: 60px; margin-bottom: 10px; }}
+
           .content {{ padding: 24px 32px; }}
           table {{ border-collapse: collapse; width: 100%; font-family: "Montserrat", sans-serif; font-size: 14px; }}
-          th, td {{ border-bottom: 1px solid #D1DCE2; text-align: right; padding: 12px 14px; }}
+          th, td {{ border-bottom: 1px solid #D1DCE2; text-align: right; padding: 12px 14px; color: #0D1B2A; }}
           th {{ background-color: #0D1B2A; color: #F6F1E9; text-align: center; font-weight: bold; border-bottom: 2px solid #314568; }}
           .positive {{ color: #27ae60; font-weight: bold; }}
           .negative {{ color: #e74c3c; font-weight: bold; }}
@@ -131,11 +130,17 @@ def format_html_email(results):
       </head>
       <body>
         <div class="container">
-          <div class="header">
-            <img src="cid:logo" alt="Atlas Capital" />
-            <h2 style="margin: 0;">Weekly Return Report</h2>
-            <p style="margin: 6px 0 0; color: #D1DCE2; font-size: 13px;">Week Ending {current_friday}</p>
-          </div>
+          <table cellpadding="0" cellspacing="0" style="width: 100%; background-color: #ffffff; border-bottom: 1px solid #D1DCE2; font-family: 'Montserrat', sans-serif;">
+            <tr>
+              <td style="border-bottom: none; text-align: left; padding: 24px 0 24px 32px; width: 80px; vertical-align: middle;">
+                <img src="cid:logo" alt="Atlas Capital" style="max-height: 60px;" />
+              </td>
+              <td style="border-bottom: none; text-align: left; padding: 24px 32px 24px 100px; vertical-align: middle;">
+                <h2 style="margin: 0; color: #314568; font-size: 15px;">Weekly Return Report</h2>
+                <p style="margin: 6px 0 0; color: #607CA4; font-size: 10px;">Week Ending {current_friday}</p>
+              </td>
+            </tr>
+          </table>
           <div class="content">
             <table>
               <tr>
@@ -233,4 +238,3 @@ def run_weekly_report():
         
     except Exception as e:
         raise e
-
