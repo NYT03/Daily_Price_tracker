@@ -367,5 +367,3 @@ def run_hourly_alert():
     }
     return response
 
-if __name__ == "__main__":
-    run_hourly_alert()
