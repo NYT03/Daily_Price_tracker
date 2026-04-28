@@ -215,7 +215,7 @@ def evaluate_alerts(all_data: list[dict], today_date: datetime.date) -> list[dic
 
         price_ok  = abs(row["pct_change"]) >= HOURLY_PRICE_CHANGE_THRESHOLD
         volume_ok = row["volume"] >= VOLUME_THRESHOLD
-        if price_ok and volume_ok:
+        if price_ok or volume_ok:
             alerts.append(row)
             logging.info(
                 f"[hourly_alert] ALERT: {sym} | "
