@@ -416,5 +416,4 @@ def run_hourly_alert():
         "email_sent":      email_sent,
     }
     return response
-if __name__ == "__main__":
-    print(run_hourly_alert())
+
