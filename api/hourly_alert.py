@@ -218,10 +218,16 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
 
     # ── Build HTML rows ────────────────────────────────────────────────────────
     rows_html = ""
-    for a in sorted(alerts, key=lambda x: abs(x["pct_change"]), reverse=True):
-        direction = "▲" if a["pct_change"] > 0 else "▼"
-        color     = "#27ae60" if a["pct_change"] > 0 else "#e74c3c"
-        rows_html += f"""
+    
+    large_cap = [a for a in alerts if a.get("market_cap", 0) >= 10_000_000_000]
+    small_cap = [a for a in alerts if a.get("market_cap", 0) < 10_000_000_000]
+    
+    def build_rows(alerts_list):
+        html = ""
+        for a in sorted(alerts_list, key=lambda x: abs(x["pct_change"]), reverse=True):
+            direction = "▲" if a["pct_change"] > 0 else "▼"
+            color     = "#27ae60" if a["pct_change"] > 0 else "#e74c3c"
+            html += f"""
         <tr>
           <td style='text-align:left;font-weight:bold;color:#314568;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['symbol']}</td>
           <td style='text-align:right;color:#0D1B2A;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>&#8377;{a['prev_close']:.2f}</td>
@@ -229,6 +235,29 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
           <td style='text-align:right;color:#0D1B2A;padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{a['volume']:,}</td>
           <td style='text-align:right;font-weight:bold;color:{color};padding:9px 14px;border-bottom:1px solid #D1DCE2;font-family:"Montserrat",sans-serif;'>{direction} {abs(a['pct_change']):.2f}%</td>
         </tr>"""
+        return html
+
+    if large_cap:
+        rows_html += f"""
+        <tr>
+          <td colspan='5' style='background:#E8EDF2;text-align:center;font-weight:bold;color:#314568;padding:10px 14px;font-family:"Montserrat",sans-serif;font-size:12px;border-bottom:1px solid #D1DCE2;'>
+            &ge; 1000Cr Market Cap (Threshold: 100,000)
+          </td>
+        </tr>
+        """
+        rows_html += build_rows(large_cap)
+
+    if small_cap:
+        if large_cap:
+             rows_html += "<tr><td colspan='5' style='height:15px;background:#ffffff;border-bottom:none;'></td></tr>"
+        rows_html += f"""
+        <tr>
+          <td colspan='5' style='background:#E8EDF2;text-align:center;font-weight:bold;color:#314568;padding:10px 14px;font-family:"Montserrat",sans-serif;font-size:12px;border-bottom:1px solid #D1DCE2;'>
+            &lt; 1000Cr Market Cap (Threshold: 20,000)
+          </td>
+        </tr>
+        """
+        rows_html += build_rows(small_cap)
 
     html = f"""
     <html><head><meta charset='UTF-8'>
