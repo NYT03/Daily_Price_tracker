@@ -39,47 +39,6 @@ logging.basicConfig(level=logging.INFO)
 
 # Global variable for best-effort cooldown in serverless environment
 _LAST_EMAIL_SENT_TIME = None
-# Dictionary to track stocks that have already been alerted today to prevent duplicates
-# Format: { "SYMBOL": "YYYY-MM-DD" }
-_ALERTED_STOCKS_TODAY = {}
-
-# Vercel KV integration for persistence
-KV_REST_API_URL = os.environ.get("KV_REST_API_URL")
-KV_REST_API_TOKEN = os.environ.get("KV_REST_API_TOKEN")
-
-def load_alerted_stocks() -> dict:
-    if not KV_REST_API_URL or not KV_REST_API_TOKEN:
-        return _ALERTED_STOCKS_TODAY
-    try:
-        resp = requests.post(
-            KV_REST_API_URL,
-            headers={"Authorization": f"Bearer {KV_REST_API_TOKEN}"},
-            json=["GET", "alerted_stocks_today"],
-            timeout=5
-        )
-        if resp.status_code == 200:
-            val = resp.json().get("result")
-            if val:
-                return json.loads(val)
-    except Exception as e:
-        logging.error(f"[hourly_alert] Error reading from KV: {e}")
-    return _ALERTED_STOCKS_TODAY
-
-def save_alerted_stocks(alerts_dict: dict, today_str: str):
-    if not KV_REST_API_URL or not KV_REST_API_TOKEN:
-        return
-    try:
-        # Keep only today's alerts to save space
-        pruned = {k: v for k, v in alerts_dict.items() if v == today_str}
-        val = json.dumps(pruned)
-        requests.post(
-            KV_REST_API_URL,
-            headers={"Authorization": f"Bearer {KV_REST_API_TOKEN}"},
-            json=["SET", "alerted_stocks_today", val, "EX", 172800],
-            timeout=5
-        )
-    except Exception as e:
-        logging.error(f"[hourly_alert] Error saving to KV: {e}")
 
 # ==========================================
 # CONFIGURATION
@@ -215,10 +174,6 @@ def evaluate_alerts(all_data: list[dict], today_date: datetime.date) -> list[dic
         # 1000 Cr = 10,000,000,000
         vol_thresh = 100000 if market_cap >= 10_000_000_000 else 20000
 
-        # Skip if we already sent an email for this stock today
-        if _ALERTED_STOCKS_TODAY.get(sym) == date_str:
-            continue
-
         price_ok  = abs(row["pct_change"]) >= HOURLY_PRICE_CHANGE_THRESHOLD
         volume_ok = row["volume"] >= vol_thresh
         if price_ok or volume_ok:
@@ -243,7 +198,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
     Each recipient receives the same message (BCC-style via sendmail list).
     Returns True on success, False on failure.
     """
-    global _LAST_EMAIL_SENT_TIME, _ALERTED_STOCKS_TODAY
+    global _LAST_EMAIL_SENT_TIME
     
     if _LAST_EMAIL_SENT_TIME is not None:
         elapsed = now_dt - _LAST_EMAIL_SENT_TIME
@@ -322,15 +277,6 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
                 </table>
               </td>
             </tr>
-            <!-- Note -->
-            <tr>
-              <td style='padding:0 32px 20px'>
-                <p style='margin:0;font-size:12px;color:#607CA4;font-family:"Montserrat",sans-serif;'>
-                  &#8226; Alert triggered when price moves &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
-                  AND intraday volume exceeds its market-cap based threshold (1,00,000 for &ge;1000Cr, 20,000 for &lt;1000Cr).
-                </p>
-              </td>
-            </tr>
             <!-- Footer -->
             <tr>
               <td style='background:#0D1B2A;padding:16px 32px;text-align:center;
@@ -376,9 +322,6 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         server.quit()
 
         _LAST_EMAIL_SENT_TIME = now_dt
-        # Record the stocks as alerted for today
-        for a in alerts:
-            _ALERTED_STOCKS_TODAY[a["symbol"]] = date_str
 
         logging.info(
             f"[hourly_alert] Email sent to {len(TO_EMAILS)} recipient(s) "
@@ -391,14 +334,10 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
 
 
 def run_hourly_alert():
-    global _ALERTED_STOCKS_TODAY
     tz      = pytz.timezone(TIMEZONE)
     now     = datetime.datetime.now(tz)
     today   = now.date()
     date_str = today.isoformat()
-
-    # Load persisted state from KV
-    _ALERTED_STOCKS_TODAY = load_alerted_stocks()
 
     logging.info(f"[hourly_alert] Triggered at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
@@ -413,8 +352,6 @@ def run_hourly_alert():
     email_sent = False
     if alerts:
         email_sent = send_hourly_alert_email(alerts, now)
-        if email_sent:
-            save_alerted_stocks(_ALERTED_STOCKS_TODAY, date_str)
 
     response = {
         "status":          "ok",
@@ -425,3 +362,5 @@ def run_hourly_alert():
         "email_sent":      email_sent,
     }
     return response
+if __name__ == "__main__":
+    print(run_hourly_alert())
