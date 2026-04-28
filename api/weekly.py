@@ -201,9 +201,11 @@ def send_email(html_content):
             logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
             with open(logo_path, "rb") as f:
                 img_data = f.read()
-            image = MIMEImage(img_data, name="logo.png")
+            # Do NOT pass name="logo.png", to prevent it appearing as an attachment
+            image = MIMEImage(img_data)
             image.add_header('Content-ID', '<logo>')
-            image.add_header('Content-Disposition', 'inline', filename="logo.png")
+            # Do NOT pass filename="logo.png" here either
+            image.add_header('Content-Disposition', 'inline')
             msg.attach(image)
         except Exception as e:
             print(f"Could not attach logo: {e}")
