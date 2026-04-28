@@ -7,7 +7,7 @@ Standalone serverless handler (Vercel /api/hourly_alert) that:
     *previous trading day's closing price*
   - Sends ONE batched alert email per hourly run when BOTH conditions are met:
       1. |price change vs prev close| >= HOURLY_PRICE_CHANGE_THRESHOLD (5%)
-      2. Cumulative intraday volume > VOLUME_THRESHOLD (20 000)
+      2. Cumulative intraday volume > threshold (100k if market cap >= 1000cr, else 20k)
   - All qualifying stocks are collected first, then a single SMTP call sends
     one email to all recipients — no duplicate emails within the same run.
 
@@ -97,7 +97,9 @@ TIMEZONE = "Asia/Kolkata"
 
 # Thresholds
 HOURLY_PRICE_CHANGE_THRESHOLD = 5.0    # percent — alert if |change vs prev close| >= this
-VOLUME_THRESHOLD              = 20000  # cumulative intraday volume must exceed this
+# Volume threshold is dynamically determined based on market cap:
+# >= 1000 Cr: 100,000
+# < 1000 Cr: 20,000
 
 # SMTP / email settings (from .env)
 SMTP_SERVER   = os.environ.get("SMTP_SERVER",   "smtp.gmail.com")
@@ -163,6 +165,7 @@ def _fetch_symbol(symbol: str, today_date) -> dict | None:
             return None
 
         pct_change = ((current_price - prev_close) / prev_close) * 100
+        market_cap = ticker.info.get("marketCap", 0)
 
         return {
             "symbol":        symbol,
@@ -170,6 +173,7 @@ def _fetch_symbol(symbol: str, today_date) -> dict | None:
             "prev_close":    prev_close,
             "pct_change":    pct_change,
             "volume":        cum_volume,
+            "market_cap":    market_cap,
         }
     except Exception as e:
         logging.warning(f"[hourly_alert] Error fetching {symbol}: {e}")
@@ -207,21 +211,24 @@ def evaluate_alerts(all_data: list[dict], today_date: datetime.date) -> list[dic
 
     for row in all_data:
         sym = row["symbol"]
-        # print(row)
+        market_cap = row.get("market_cap", 0)
+        # 1000 Cr = 10,000,000,000
+        vol_thresh = 100000 if market_cap >= 10_000_000_000 else 20000
 
         # Skip if we already sent an email for this stock today
         if _ALERTED_STOCKS_TODAY.get(sym) == date_str:
             continue
 
         price_ok  = abs(row["pct_change"]) >= HOURLY_PRICE_CHANGE_THRESHOLD
-        volume_ok = row["volume"] >= VOLUME_THRESHOLD
+        volume_ok = row["volume"] >= vol_thresh
         if price_ok or volume_ok:
+            row["vol_thresh"] = vol_thresh
             alerts.append(row)
             logging.info(
                 f"[hourly_alert] ALERT: {sym} | "
                 f"Prev close ₹{row['prev_close']:.2f} → "
                 f"Current ₹{row['current_price']:.2f} "
-                f"({row['pct_change']:+.2f}%) | Vol {row['volume']:,}"
+                f"({row['pct_change']:+.2f}%) | Vol {row['volume']:,} | Thresh {vol_thresh:,}"
             )
 
     return alerts
@@ -290,7 +297,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
                       <h2 style='margin:0;color:#314568;font-size:15px;font-family:"Montserrat",sans-serif;'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
                       <p style='margin:6px 0 0;color:#607CA4;font-size:10px;font-family:"Montserrat",sans-serif;'>
                         {len(alerts)} stock(s) moved &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
-                        with volume &gt; {VOLUME_THRESHOLD:,}
+                        with volume exceeding their respective thresholds
                       </p>
                     </td>
                   </tr>
@@ -320,7 +327,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
               <td style='padding:0 32px 20px'>
                 <p style='margin:0;font-size:12px;color:#607CA4;font-family:"Montserrat",sans-serif;'>
                   &#8226; Alert triggered when price moves &ge;{HOURLY_PRICE_CHANGE_THRESHOLD}% from previous day&rsquo;s close
-                  AND intraday volume exceeds {VOLUME_THRESHOLD:,} shares.
+                  AND intraday volume exceeds its market-cap based threshold (1,00,000 for &ge;1000Cr, 20,000 for &lt;1000Cr).
                 </p>
               </td>
             </tr>
@@ -351,7 +358,8 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         msg_alt.attach(MIMEText(html, "html"))
 
         try:
-            with open(r"d:\Internship\Automation\logo.png", "rb") as f:
+            logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
+            with open(logo_path, "rb") as f:
                 img_data = f.read()
             image = MIMEImage(img_data, name="logo.png")
             image.add_header('Content-ID', '<logo>')

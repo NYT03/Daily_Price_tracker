@@ -198,7 +198,8 @@ def send_email(html_content):
         msg_alt.attach(MIMEText(html_content, "html"))
 
         try:
-            with open(r"d:\Internship\Automation\logo.png", "rb") as f:
+            logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
+            with open(logo_path, "rb") as f:
                 img_data = f.read()
             image = MIMEImage(img_data, name="logo.png")
             image.add_header('Content-ID', '<logo>')
