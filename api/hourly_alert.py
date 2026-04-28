@@ -14,6 +14,7 @@ Standalone serverless handler (Vercel /api/hourly_alert) that:
 The existing index.py interval-reporting pipeline is left completely untouched.
 """
 
+import __main__
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 import logging
@@ -361,8 +362,10 @@ def run_hourly_alert():
         "timestamp":       now.isoformat(),
         "symbols_checked": len(all_data),
         "alerts_fired":    len(alerts),
-        "alert_symbols":   [a["symbol"] forf a in alerts],
+        "alert_symbols":   [a["symbol"] for a in alerts],
         "email_sent":      email_sent,
     }
     return response
 
+if __name__ == "__main__":
+    run_hourly_alert()
