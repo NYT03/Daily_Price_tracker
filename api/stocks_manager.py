@@ -17,6 +17,24 @@ has no shortName/longName, it's considered invalid.
 import json
 import os
 import yfinance as yf
+from pymongo import MongoClient
+
+# ── Database connection ───────────────────────────────────────────────────────
+_MONGO_URI = os.getenv("MONGO_URI")
+_db_client = None
+_db_collection = None
+
+def _get_db():
+    global _db_client, _db_collection
+    if _db_client is None and _MONGO_URI:
+        try:
+            _db_client = MongoClient(_MONGO_URI)
+            # Use 'atlascapital' database and 'config' collection
+            db = _db_client.get_database()
+            _db_collection = db["config"]
+        except Exception as e:
+            print(f"Error connecting to MongoDB: {e}")
+    return _db_collection
 
 # ── File path for symbol storage ──────────────────────────────────────────────
 _STOCKS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stocks.json")
@@ -31,9 +49,18 @@ _DEFAULT_SYMBOLS = [
 
 
 def load_symbols() -> list[str]:
-    """Load symbols from stocks.json; seed with defaults if missing."""
+    """Load symbols from MongoDB (preferred) or stocks.json; seed with defaults."""
+    db_col = _get_db()
+    if db_col is not None:
+        try:
+            doc = db_col.find_one({"key": "watchlist"})
+            if doc and "symbols" in doc:
+                return doc["symbols"]
+        except Exception as e:
+            print(f"Error loading from MongoDB: {e}")
+
+    # Fallback to local file (e.g. for local dev or initial seed)
     if not os.path.exists(_STOCKS_FILE):
-        _save_symbols(_DEFAULT_SYMBOLS)
         return list(_DEFAULT_SYMBOLS)
     try:
         with open(_STOCKS_FILE, "r") as f:
@@ -44,9 +71,25 @@ def load_symbols() -> list[str]:
 
 
 def _save_symbols(symbols: list[str]):
-    """Persist symbols list to stocks.json."""
-    with open(_STOCKS_FILE, "w") as f:
-        json.dump({"symbols": symbols}, f, indent=2)
+    """Persist symbols list to MongoDB and local file (if writable)."""
+    db_col = _get_db()
+    if db_col is not None:
+        try:
+            db_col.update_one(
+                {"key": "watchlist"},
+                {"$set": {"symbols": symbols}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"Error saving to MongoDB: {e}")
+
+    # Attempt to save locally (will fail on Vercel, which is expected)
+    try:
+        with open(_STOCKS_FILE, "w") as f:
+            json.dump({"symbols": symbols}, f, indent=2)
+    except Exception as e:
+        # On Vercel this is normal, so we just log it
+        print(f"Local file write skipped (likely read-only FS): {e}")
 
 
 def validate_symbol(symbol: str) -> dict:

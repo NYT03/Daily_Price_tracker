@@ -4,3 +4,4 @@ pytz
 gspread
 oauth2client
 python-dotenv
+pymongo[srv]
