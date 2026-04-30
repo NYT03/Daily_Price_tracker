@@ -11,6 +11,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 _ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(_ENV_PATH)
 
+if not os.environ.get("MONGO_URI"):
+    print(f"CRITICAL: MONGO_URI not found in {_ENV_PATH}")
+else:
+    print("MONGO_URI loaded successfully from .env")
+
 from hourly_alert import run_hourly_alert
 from weekly import run_weekly_report
 from main_tracker import run_main_tracker

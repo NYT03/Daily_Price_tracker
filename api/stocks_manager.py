@@ -20,18 +20,23 @@ import yfinance as yf
 from pymongo import MongoClient
 
 # ── Database connection ───────────────────────────────────────────────────────
-_MONGO_URI = os.getenv("MONGO_URI")
 _db_client = None
 _db_collection = None
 
 def _get_db():
     global _db_client, _db_collection
-    if _db_client is None and _MONGO_URI:
+    if _db_client is None:
+        mongo_uri = os.getenv("MONGO_URI")
+        if not mongo_uri:
+            print("Warning: MONGO_URI environment variable is not set.")
+            return None
         try:
-            _db_client = MongoClient(_MONGO_URI)
+            _db_client = MongoClient(mongo_uri)
             # Use 'atlascapital' database and 'config' collection
-            db = _db_client.get_database()
+            # Explicitly specify database name to avoid ambiguity
+            db = _db_client["atlascapital"]
             _db_collection = db["config"]
+            print(f"Successfully connected to MongoDB database: {db.name}")
         except Exception as e:
             print(f"Error connecting to MongoDB: {e}")
     return _db_collection
@@ -56,6 +61,11 @@ def load_symbols() -> list[str]:
             doc = db_col.find_one({"key": "watchlist"})
             if doc and "symbols" in doc:
                 return doc["symbols"]
+            else:
+                # SEED THE DATABASE: If database is connected but empty, save defaults
+                print("Database is empty. Seeding with default symbols...")
+                _save_symbols(list(_DEFAULT_SYMBOLS))
+                return list(_DEFAULT_SYMBOLS)
         except Exception as e:
             print(f"Error loading from MongoDB: {e}")
 
