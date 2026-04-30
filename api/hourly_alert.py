@@ -14,7 +14,7 @@ Standalone serverless handler (Vercel /api/hourly_alert) that:
 The existing index.py interval-reporting pipeline is left completely untouched.
 """
 
-import __main__
+
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 import logging
@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import json
 import requests
+from stocks_manager import load_symbols
 
 # ── Load env vars ──────────────────────────────────────────────────────────────
 _ENV_PATH = os.path.join(
@@ -45,14 +46,7 @@ _LAST_EMAIL_SENT_TIME = None
 # ==========================================
 # CONFIGURATION
 # ==========================================
-COMPANY_SYMBOLS = [
-    "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS", 
-    "AIRFLOA.BO", "TITAGARH.NS", "BEML.NS", "ZODIAC.NS", "SAHAJSOLAR-SM.NS",
-    "SOLARIUM.BO", "GULPOLY.BO", "GAEL.BO", "SUKHJITS.NS", 
-    "SRSOLTD.BO", "PRIMECAB-SM.NS", "DYCL.BO", "VMARCIND-SM.NS"
-]
 INDEX_SYMBOLS = ["^NSEI", "NIFTY_SME_EMERGE.NS"]
-ALL_SYMBOLS   = COMPANY_SYMBOLS + INDEX_SYMBOLS
 
 TIMEZONE = "Asia/Kolkata"
 
@@ -143,19 +137,18 @@ def _fetch_symbol(symbol: str, today_date) -> dict | None:
 
 def fetch_all(today_date) -> list[dict]:
     """Fetches data for all symbols in parallel and returns raw results."""
+    company_symbols = load_symbols()
+    all_symbols = company_symbols + INDEX_SYMBOLS
     results = []
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {
             executor.submit(_fetch_symbol, sym, today_date): sym
-            for sym in ALL_SYMBOLS
+            for sym in all_symbols
         }
         for future in futures:
             data = future.result()
             if data is not None:
                 results.append(data)
-        # for res in results:
-        #     print(res)
-        # print("\n")
     return results
 
 

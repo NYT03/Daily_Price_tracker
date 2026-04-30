@@ -30,7 +30,7 @@ _DEFAULT_SYMBOLS = [
 ]
 
 
-def _load_symbols() -> list[str]:
+def load_symbols() -> list[str]:
     """Load symbols from stocks.json; seed with defaults if missing."""
     if not os.path.exists(_STOCKS_FILE):
         _save_symbols(_DEFAULT_SYMBOLS)
@@ -83,7 +83,7 @@ def validate_symbol(symbol: str) -> dict:
 
 def handle_get_stocks() -> tuple[int, str, bytes]:
     """Return current symbol list as JSON."""
-    symbols = _load_symbols()
+    symbols = load_symbols()
     body = json.dumps({"symbols": symbols}).encode("utf-8")
     return 200, "application/json", body
 
@@ -105,7 +105,7 @@ def handle_add_symbol(symbol: str) -> tuple[int, str, bytes]:
         return 400, "application/json", body
 
     symbol = symbol.strip().upper()
-    symbols = _load_symbols()
+    symbols = load_symbols()
 
     if symbol in symbols:
         body = json.dumps({"error": f"'{symbol}' already exists in the list"}).encode("utf-8")
@@ -136,7 +136,7 @@ def handle_remove_symbol(symbol: str) -> tuple[int, str, bytes]:
         return 400, "application/json", body
 
     symbol = symbol.strip().upper()
-    symbols = _load_symbols()
+    symbols = load_symbols()
 
     if symbol not in symbols:
         body = json.dumps({"error": f"'{symbol}' not found in list"}).encode("utf-8")

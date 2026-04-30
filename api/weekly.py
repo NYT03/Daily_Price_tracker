@@ -11,19 +11,12 @@ from dotenv import load_dotenv
 import yfinance as yf
 import pandas as pd
 
-# Load .env from the project root (one level above this api/ folder)
 _ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(_ENV_PATH)
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
-COMPANY_SYMBOLS = [
-    "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS", 
-    "AIRFLOA.BO", "TITAGARH.NS", "BEML.NS", "ZODIAC.NS", "SAHAJSOLAR-SM.NS",
-    "SOLARIUM.BO", "GULPOLY.BO", "GAEL.BO", "SUKHJITS.NS", 
-    "SRSOLTD.BO", "PRIMECAB-SM.NS", "DYCL.BO", "VMARCIND-SM.NS"
-]
+from stocks_manager import load_symbols
+
+
 
 # Email Configuration - Set these in Vercel Environment Variables
 SMTP_SERVER   = os.environ.get("SMTP_SERVER",   "smtp.gmail.com")
@@ -98,9 +91,10 @@ def calculate_single_return(symbol):
         return {"ticker": symbol, "error": str(e)}
 
 def get_all_weekly_returns():
+    company_symbols = load_symbols()
     results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(calculate_single_return, sym): sym for sym in COMPANY_SYMBOLS}
+        futures = {executor.submit(calculate_single_return, sym): sym for sym in company_symbols}
         for future in futures:
             results.append(future.result())
     return results

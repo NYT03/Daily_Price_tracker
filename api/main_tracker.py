@@ -12,19 +12,12 @@ from dotenv import load_dotenv
 _ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(_ENV_PATH)
 
+from stocks_manager import load_symbols
+
 # ==========================================
 # CONFIGURATION
 # ==========================================
-COMPANY_SYMBOLS = [
-    "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS", 
-    "AIRFLOA.BO", "TITAGARH.NS", "BEML.NS", "ZODIAC.NS", "SAHAJSOLAR-SM.NS",
-    "SOLARIUM.BO", "GULPOLY.BO", "GAEL.BO", "SUKHJITS.NS", 
-    "SRSOLTD.BO", "PRIMECAB-SM.NS", "DYCL.BO", "VMARCIND-SM.NS"
-]
-
 INDEX_SYMBOLS = ["^NSEI", "NIFTY_SME_EMERGE.NS"]
-
-ALL_SYMBOLS = COMPANY_SYMBOLS + INDEX_SYMBOLS
 
 # PASTE YOUR APPS SCRIPT WEB APP URL HERE:
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyhdbIDYjOOJab7OibhytbpM0ys0aINPRjXo4o0j3_sQDCo9wh4rhTzdZdM-c9KX0db/exec"
@@ -90,10 +83,10 @@ def fetch_single(symbol, target_slot, now_dt):
     except Exception as e:
         return {"symbol": symbol, "error": str(e)}
 
-def fetch_all_data(target_slot, now_dt):
+def fetch_all_data(target_slot, now_dt, all_symbols):
     results = {}
     with ThreadPoolExecutor(max_workers=20) as executor:
-        futures = {executor.submit(fetch_single, sym, target_slot, now_dt): sym for sym in ALL_SYMBOLS}
+        futures = {executor.submit(fetch_single, sym, target_slot, now_dt): sym for sym in all_symbols}
         for future in futures:
             data = future.result()
             if "error" not in data:
@@ -124,20 +117,23 @@ def run_main_tracker():
     tz = pytz.timezone(TIMEZONE)
     now = datetime.datetime.now(tz)
     
+    company_symbols = load_symbols()
+    all_symbols = company_symbols + INDEX_SYMBOLS
+
     target_slot = get_target_slot(now)
     date_str = now.strftime("%Y-%m-%d")
     
     if not target_slot:
         return 200, 'text/plain', b"Tracker running successfully, but current time does not match a schedule window. No fetch performed."
 
-    market_data = fetch_all_data(target_slot, now)
+    market_data = fetch_all_data(target_slot, now, all_symbols)
     if not market_data:
         return 500, 'text/plain', b"Failed to fetch market data from Yahoo Finance."
 
     payload = {
         "date": date_str,
         "time_slot": target_slot,
-        "companies": ALL_SYMBOLS,
+        "companies": all_symbols,
         "fetch_times": FETCH_TIMES,
         "data": market_data
     }
