@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 import os
 import json
 from dotenv import load_dotenv
@@ -31,12 +32,17 @@ TO_EMAILS     = [
 # ==========================================
 # WEEKLY RETURN LOGIC  (via Yahoo Finance)
 # ==========================================
-def get_target_fridays():
+def get_target_dates():
     today = datetime.today()
+    current_date = today.date()
+    
+    # Calculate days back to the most recent Friday
     days_since_friday = (today.weekday() - 4) % 7
-    current_friday = today - timedelta(days=days_since_friday)
-    last_friday = current_friday - timedelta(days=7)
-    return current_friday.date(), last_friday.date()
+    # If today is Friday, we want the previous Friday (7 days ago)
+    days_to_last_friday = 7 if days_since_friday == 0 else days_since_friday
+    
+    last_date = current_date - timedelta(days=days_to_last_friday)
+    return current_date, last_date
 
 def get_closest_close(hist, target_date):
     # Convert dates to match tz-aware hist index
@@ -53,25 +59,25 @@ def get_closest_close(hist, target_date):
 
 def calculate_single_return(symbol):
     try:
-        current_friday, last_friday = get_target_fridays()
+        current_date, last_date = get_target_dates()
         ticker = yf.Ticker(symbol)
         
-        # Using 1 month to ensure we get data for the last two Fridays
+        # Using 1 month to ensure we get data for the last two dates
         try:
             hist = ticker.history(period="1mo")
         except Exception:
             import pandas as pd
             hist = pd.DataFrame()
 
-        c_date, close_current = get_closest_close(hist, current_friday)
-        l_date, close_last = get_closest_close(hist, last_friday)
+        c_date, close_current = get_closest_close(hist, current_date)
+        l_date, close_last = get_closest_close(hist, last_date)
 
         if close_current is None:
             try:
                 fallback_close = ticker.info.get("previousClose")
                 if fallback_close is not None:
                     close_current = fallback_close
-                    c_date = current_friday
+                    c_date = current_date
             except Exception:
                 pass
 
@@ -81,10 +87,10 @@ def calculate_single_return(symbol):
         weekly_return = ((close_current - close_last) / close_last) * 100
         return {
             "ticker": symbol,
-            "last_friday_close":   close_last,
-            "last_friday_date":    str(l_date),
-            "current_friday_close": close_current,
-            "current_friday_date":  str(c_date),
+            "last_close":   close_last,
+            "last_date":    str(l_date),
+            "current_close": close_current,
+            "current_date":  str(c_date),
             "weekly_return":       weekly_return
         }
     except Exception as e:
@@ -103,7 +109,7 @@ def get_all_weekly_returns():
 # EMAIL LOGIC
 # ==========================================
 def format_html_email(results):
-    current_friday, _ = get_target_fridays()
+    current_date, _ = get_target_dates()
     html = f"""
     <html>
       <head>
@@ -131,7 +137,7 @@ def format_html_email(results):
               </td>
               <td style="border-bottom: none; text-align: left; padding: 24px 32px 24px 100px; vertical-align: middle;">
                 <h2 style="margin: 0; color: #314568; font-size: 15px;">Weekly Return Report</h2>
-                <p style="margin: 6px 0 0; color: #607CA4; font-size: 10px;">Week Ending {current_friday}</p>
+                <p style="margin: 6px 0 0; color: #607CA4; font-size: 10px;">Week Ending {current_date}</p>
               </td>
             </tr>
           </table>
@@ -139,8 +145,8 @@ def format_html_email(results):
             <table>
               <tr>
                 <th style="text-align: left;">Ticker</th>
-                <th>Last Friday Close</th>
-                <th>Current Friday Close</th>
+                <th>Previous Close</th>
+                <th>Current Close</th>
                 <th>Weekly Return (%)</th>
               </tr>
     """
@@ -154,8 +160,8 @@ def format_html_email(results):
             html += f"""
               <tr>
                 <td class='ticker'>{res['ticker']}</td>
-                <td>{res['last_friday_close']:.2f} <br><small style="color: #607CA4;">({res['last_friday_date']})</small></td>
-                <td>{res['current_friday_close']:.2f} <br><small style="color: #607CA4;">({res['current_friday_date']})</small></td>
+                <td>{res['last_close']:.2f} <br><small style="color: #607CA4;">({res['last_date']})</small></td>
+                <td>{res['current_close']:.2f} <br><small style="color: #607CA4;">({res['current_date']})</small></td>
                 <td class='{color_class}'>{ret:.2f}%</td>
               </tr>
             """
