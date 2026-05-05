@@ -50,7 +50,10 @@ def get_closest_close(hist, target_date):
         target_dt = pd.to_datetime(target_date).tz_localize(hist.index.tz)
     else:
         target_dt = pd.to_datetime(target_date)
-        
+
+    print(target_date)
+    print("\n")
+    
     past_dates = hist[hist.index <= target_dt]
     if past_dates.empty:
         return None, None
@@ -68,7 +71,6 @@ def calculate_single_return(symbol):
         except Exception:
             import pandas as pd
             hist = pd.DataFrame()
-
         c_date, close_current = get_closest_close(hist, current_date)
         l_date, close_last = get_closest_close(hist, last_date)
 
@@ -99,6 +101,7 @@ def calculate_single_return(symbol):
 def get_all_weekly_returns():
     company_symbols = load_symbols()
     results = []
+    company_symbols=["AVPINFRA-SM.NS"]
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(calculate_single_return, sym): sym for sym in company_symbols}
         for future in futures:
@@ -241,3 +244,5 @@ def run_weekly_report():
         
     except Exception as e:
         raise e
+if __name__=="__main__":
+    run_weekly_report()
