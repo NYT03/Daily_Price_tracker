@@ -24,7 +24,6 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.image import MIMEImage
 from http.server import BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import json
@@ -241,7 +240,7 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
                 <table width='100%' cellpadding='0' cellspacing='0'>
                   <tr>
                     <td width='80' style='vertical-align:middle;'>
-                      <img src="cid:logo" alt="Atlas Capital" style="max-height: 60px;" />
+                      <img src="https://atlascapital.in/wp-content/uploads/2025/02/Logo-blue-.png" alt="Atlas Capital" style="max-height: 60px;" />
                     </td>
                     <td style='vertical-align:middle;text-align:left;padding-left:100px;'>
                       <h2 style='margin:0;color:#314568;font-size:15px;font-family:"Montserrat",sans-serif;'>&#9200; Intraday Price Alert &mdash; {date_str} @ {time_str}</h2>
@@ -297,19 +296,6 @@ def send_hourly_alert_email(alerts: list[dict], now_dt: datetime.datetime) -> bo
         msg_alt = MIMEMultipart("alternative")
         msg.attach(msg_alt)
         msg_alt.attach(MIMEText(html, "html"))
-
-        try:
-            logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
-            with open(logo_path, "rb") as f:
-                img_data = f.read()
-            # Do NOT pass name="logo.png", to prevent it appearing as an attachment
-            image = MIMEImage(img_data)
-            image.add_header('Content-ID', '<logo>')
-            # Do NOT pass filename="logo.png" here either
-            image.add_header('Content-Disposition', 'inline')
-            msg.attach(image)
-        except Exception as e:
-            logging.warning(f"[hourly_alert] Could not attach logo: {e}")
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()

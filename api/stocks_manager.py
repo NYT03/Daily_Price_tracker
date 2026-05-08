@@ -6,9 +6,7 @@ API endpoints for managing the COMPANY_SYMBOLS watchlist:
   POST /api/stocks          → validates & adds a symbol
   DELETE /api/stocks        → removes a symbol
 
-Symbols are stored in stocks.json alongside this file so they persist
-across serverless cold-starts (on Vercel use KV for persistence; locally
-the file works fine).
+Symbols are stored in MongoDB to persist across serverless cold-starts.
 
 Symbol validation is done via yfinance: if a ticker returns no info or
 has no shortName/longName, it's considered invalid.
@@ -41,9 +39,6 @@ def _get_db():
             print(f"Error connecting to MongoDB: {e}")
     return _db_collection
 
-# ── File path for symbol storage ──────────────────────────────────────────────
-_STOCKS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stocks.json")
-
 # ── Default symbols (from main_tracker.py / hourly_alert.py) ─────────────────
 _DEFAULT_SYMBOLS = [
     "AVPINFRA-SM.NS", "SRM.NS", "SAHASRA-SM.NS", "KAYNES.NS",
@@ -54,7 +49,7 @@ _DEFAULT_SYMBOLS = [
 
 
 def load_symbols() -> list[str]:
-    """Load symbols from MongoDB (preferred) or stocks.json; seed with defaults."""
+    """Load symbols from MongoDB; seed with defaults if empty."""
     db_col = _get_db()
     if db_col is not None:
         try:
@@ -69,19 +64,12 @@ def load_symbols() -> list[str]:
         except Exception as e:
             print(f"Error loading from MongoDB: {e}")
 
-    # Fallback to local file (e.g. for local dev or initial seed)
-    if not os.path.exists(_STOCKS_FILE):
-        return list(_DEFAULT_SYMBOLS)
-    try:
-        with open(_STOCKS_FILE, "r") as f:
-            data = json.load(f)
-        return data.get("symbols", list(_DEFAULT_SYMBOLS))
-    except Exception:
-        return list(_DEFAULT_SYMBOLS)
+    # Fallback to defaults if MongoDB is unavailable or errors
+    return list(_DEFAULT_SYMBOLS)
 
 
 def _save_symbols(symbols: list[str]):
-    """Persist symbols list to MongoDB and local file (if writable)."""
+    """Persist symbols list to MongoDB."""
     db_col = _get_db()
     if db_col is not None:
         try:
@@ -92,14 +80,6 @@ def _save_symbols(symbols: list[str]):
             )
         except Exception as e:
             print(f"Error saving to MongoDB: {e}")
-
-    # Attempt to save locally (will fail on Vercel, which is expected)
-    try:
-        with open(_STOCKS_FILE, "w") as f:
-            json.dump({"symbols": symbols}, f, indent=2)
-    except Exception as e:
-        # On Vercel this is normal, so we just log it
-        print(f"Local file write skipped (likely read-only FS): {e}")
 
 
 def validate_symbol(symbol: str) -> dict:
