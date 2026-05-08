@@ -101,7 +101,6 @@ def calculate_single_return(symbol):
 def get_all_weekly_returns():
     company_symbols = load_symbols()
     results = []
-    company_symbols=["AVPINFRA-SM.NS"]
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(calculate_single_return, sym): sym for sym in company_symbols}
         for future in futures:
